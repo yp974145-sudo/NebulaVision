@@ -1,11 +1,14 @@
 #include "mainwidget.h"
 #include "../util/winmanager.h"
+#include <QGuiApplication>
+#include <QScreen>
 
 MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 {
     this->setWindowTitle("监控系统主页面");
-    this->setMinimumSize(1800,1000);
-    resize(1800,1000);
+    // 允许适配常见笔记本屏幕，并可拖动窗口边缘缩放。
+    this->setMinimumSize(960,640);
+    resize(1200,760);
     //窗口主布局采取垂直布局
     QVBoxLayout *main_layout=new QVBoxLayout;
     this->setLayout(main_layout);

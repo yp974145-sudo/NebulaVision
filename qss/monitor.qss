@@ -12,3 +12,4 @@ QListWidget::item:alternate{ background-color:#f0f0f0; }
 QListWidget QScrollBar:vertical{ width:0px; background-color:transparent; margin:0; }
 QListWidget QScrollBar:horizontal{ height:0px; }
 QListWidget QScrollBar::handle, QListWidget QScrollBar::add-line, QListWidget QScrollBar::sub-line, QListWidget QScrollBar::add-page, QListWidget QScrollBar::sub-page{ background:transparent; }
+QLabel { color:#e6e6e6; }

@@ -111,7 +111,9 @@ FfmpegPlayer::FfmpegPlayer(QWidget *parent) : VideoPlayer(parent)
 {
     surface = new QLabel(parent);
     surface->setAlignment(Qt::AlignCenter);
-    surface->setMinimumSize(320,180);
+    surface->setMinimumSize(160,90);
+    // 不让上一帧图片的尺寸成为布局的最小尺寸。
+    surface->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
     surface->setText("FFmpeg视频画面");
     surface->setStyleSheet("background:#111;color:white;");
     renderTimer.setInterval(33);
@@ -134,6 +136,7 @@ QWidget *FfmpegPlayer::videoWidget() { return surface; }
 void FfmpegPlayer::open(const QString &source)
 {
     stop();
+    currentSource.clear();
     QUrl url(source);
     networkSource = url.scheme()=="rtsp" || url.scheme()=="rtsps";
     if (networkSource) {
@@ -184,8 +187,29 @@ void FfmpegPlayer::startDecoding()
     task->start();
     emit statusChanged("FFmpeg正在连接（静音预览）");
 }
-void FfmpegPlayer::pause() { if(task) {userPaused=true;task->setPaused(true);emit statusChanged("已暂停");} }
-void FfmpegPlayer::resume() { if(task && task->isRunning()) {userPaused=false;task->setPaused(false);emit statusChanged("正在播放");} }
+void FfmpegPlayer::pause()
+{
+    if (task && task->isRunning()) {
+        userPaused = true;
+        task->setPaused(true);
+        emit statusChanged("已暂停");
+    }
+}
+void FfmpegPlayer::resume()
+{
+    if (task && task->isRunning()) {
+        userPaused = false;
+        task->setPaused(false);
+        emit statusChanged("正在播放");
+    } else if (!currentSource.isEmpty()) {
+        // 停止和播放结束后任务已退出，重新创建任务从头播放。
+        // 用副本：open会清理成员currentSource，不能把同一个成员引用传进去。
+        QString source = currentSource;
+        open(source);
+    } else {
+        emit statusChanged("请先打开视频或RTSP地址");
+    }
+}
 void FfmpegPlayer::clearTask()
 {
     if (task) {

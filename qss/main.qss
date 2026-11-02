@@ -1,8 +1,8 @@
 QWidget{ background-color:#3B3F48; }
-#login_lab, #title, #ctime{ color:white; font-size:20pt; font-weight:bold; margin:10px; }
-#title{ font-size:30pt; }
+#login_lab, #title, #ctime{ color:white; font-size:12pt; font-weight:bold; margin:4px; }
+#title{ font-size:18pt; }
 #login_lab{ font-size:14pt; }
-QPushButton{ color:white; background-color:black; padding:10px 16px; border-radius:10px; font-size:16pt; font-family:"Microsoft YaHei"; }
+QPushButton{ color:white; background-color:black; padding:6px 10px; border-radius:10px; font-size:11pt; font-family:"Microsoft YaHei"; }
 QPushButton:hover{ background-color:#222222; }
 QPushButton:pressed{ background-color:#444444; }
 QPushButton:disabled{ color:#888888; background-color:#333333; }

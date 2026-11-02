@@ -13,7 +13,8 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     QWidget *left = new QWidget(this);
     left->setObjectName("left_box");
     QVBoxLayout *leftLayout = new QVBoxLayout(left);
-    left->setMinimumWidth(260);
+    left->setMinimumWidth(180);
+    left->setMaximumWidth(240);
     QLabel *listTitle = new QLabel("预览通道（尚未接设备管理）");
     listTitle->setWordWrap(true);
     leftLayout->addWidget(listTitle);
@@ -42,21 +43,31 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
         connect(players[i],&VideoPlayer::statusChanged,status,&QLabel::setText);
         connect(players[i],&VideoPlayer::playbackError,status,&QLabel::setText);
     }
-    QHBoxLayout *buttons = new QHBoxLayout;
+    // 按功能分三行，窗口变小时不再被一长排按钮撑住。
+    QGridLayout *buttons = new QGridLayout;
     QPushButton *single = new QPushButton("单画面");
     QPushButton *four = new QPushButton("四画面");
     QPushButton *open = new QPushButton("打开本地视频");
     QPushButton *stream = new QPushButton("打开RTSP");
     QPushButton *pause = new QPushButton("暂停当前");
-    QPushButton *resume = new QPushButton("继续当前");
+    QPushButton *resume = new QPushButton("继续/重播当前");
     QPushButton *stop = new QPushButton("停止当前");
+    QPushButton *pauseAll = new QPushButton("全部暂停");
+    QPushButton *resumeAll = new QPushButton("全部继续/重播");
     QPushButton *stopAllButton = new QPushButton("全部停止");
-    buttons->addWidget(single); buttons->addWidget(four);
-    buttons->addWidget(open); buttons->addWidget(stream);
-    buttons->addWidget(pause); buttons->addWidget(resume);
-    buttons->addWidget(stop); buttons->addWidget(stopAllButton);
+    pauseAll->setObjectName("pauseAll");
+    resumeAll->setObjectName("resumeAll");
+    stopAllButton->setObjectName("stopAll");
+    buttons->addWidget(single,0,0); buttons->addWidget(four,0,1);
+    buttons->addWidget(open,0,2); buttons->addWidget(stream,0,3);
+    buttons->addWidget(pause,1,0); buttons->addWidget(resume,1,1);
+    buttons->addWidget(stop,1,2);
+    buttons->addWidget(pauseAll,2,0); buttons->addWidget(resumeAll,2,1);
+    buttons->addWidget(stopAllButton,2,2);
     rightLayout->addLayout(buttons);
-    rightLayout->addWidget(new QLabel("先在左侧选择通道再打开视频。预览为静音；切换布局保留各通道播放。"));
+    QLabel *hint = new QLabel("左侧选择通道后打开视频。暂停后继续；停止或结束后从头重播。预览静音。");
+    hint->setWordWrap(true);
+    rightLayout->addWidget(hint);
     connect(single,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel1);
     connect(four,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel4);
     connect(channelList,&QListWidget::currentRowChanged,this,[this](int row){
@@ -75,6 +86,12 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     connect(pause,&QPushButton::clicked,this,[this](){players[selectedChannel]->pause();});
     connect(resume,&QPushButton::clicked,this,[this](){players[selectedChannel]->resume();});
     connect(stop,&QPushButton::clicked,this,[this](){players[selectedChannel]->stop();});
+    connect(pauseAll,&QPushButton::clicked,this,[this](){
+        for(int i=0;i<4;i++) players[i]->pause();
+    });
+    connect(resumeAll,&QPushButton::clicked,this,[this](){
+        for(int i=0;i<4;i++) players[i]->resume();
+    });
     connect(stopAllButton,&QPushButton::clicked,this,&MonitorWidget::stopAll);
     QFile qss(":/qss/monitor.qss");
     if(qss.open(QIODevice::ReadOnly)) setStyleSheet(qss.readAll());
