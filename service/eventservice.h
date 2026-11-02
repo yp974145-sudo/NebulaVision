@@ -8,14 +8,20 @@
 class EventService
 {
 public:
-    EventResult queryLatest(const QString &configPath = QString())
+    EventResult queryLatest(const QString &configPath = QString(), bool byDate = false,
+                            const QDate &date = QDate(), int page = 1, int size = 100)
     {
+        if (byDate && !date.isValid()) {
+            EventResult result;
+            result.error = "请选择有效日期";
+            return result;
+        }
         QString path = configPath;
         if (path.isEmpty()) {
             QDir directory(QCoreApplication::applicationDirPath());
             path = directory.filePath("../NebulaVision/config/viewer.local.json");
         }
-        return repository.queryLatest(path);
+        return repository.queryLatest(path, byDate, date, qMax(1, page), qBound(1, size, 100));
     }
 private:
     EventRepository repository;

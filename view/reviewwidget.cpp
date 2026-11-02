@@ -64,17 +64,6 @@ ReviewWidget::ReviewWidget(QWidget *parent, const QString &configPath) : QWidget
     layout->addWidget(detail);
     previous->setEnabled(false);
     next->setEnabled(false);
-    // 阶段2只做新事件列表，禁用未接通的日期和分页，避免误以为筛选已生效。
-    connect(typeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [this, query](int index) {
-        bool legacyRecords = (index == 0);
-        datePicker->setEnabled(legacyRecords);
-        query->setEnabled(legacyRecords);
-        pageSize->setEnabled(legacyRecords);
-    });
-    datePicker->setEnabled(false);
-    query->setEnabled(false);
-    pageSize->setEnabled(false);
     connect(query,&QPushButton::clicked,this,[this]{ resetQuery(true); });
     connect(all,&QPushButton::clicked,this,[this]{ resetQuery(false); });
     connect(datePicker,&DataPicker::dateSelected,this,[this](const QDate &){ resetQuery(true); });
@@ -162,7 +151,8 @@ void ReviewWidget::loadEvents()
     jump->setEnabled(false);
     jump->blockSignals(false);
 
-    EventResult result = eventService.queryLatest(eventConfigPath);
+    EventResult result = eventService.queryLatest(eventConfigPath, byDate, selectedDate, page,
+                                                        pageSize->currentText().toInt());
     if (result.error.isEmpty() == false) {
         count->setText("新库事件加载失败");
         detail->setText(result.error);
@@ -181,8 +171,17 @@ void ReviewWidget::loadEvents()
     }
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     table->horizontalHeader()->setStretchLastSection(true);
-    count->setText(QString("新库事件：已显示 %1 条（最多100条）").arg(result.events.size()));
-    detail->setText("当前展示新库最近100条事件；日期和分页将在阶段3接入。合成事件仅供测试，暂不支持录像播放。");
+    page = result.page;
+    pages = result.pages;
+    jump->blockSignals(true);
+    jump->setRange(1, pages);
+    jump->setValue(page);
+    jump->setEnabled(result.total > 0);
+    jump->blockSignals(false);
+    previous->setEnabled(page > 1);
+    next->setEnabled(page < pages);
+    count->setText(QString("新库事件：共 %1 条 · 第 %2 / %3 页").arg(result.total).arg(page).arg(pages));
+    detail->setText("按UTC日期查询新库事件。合成事件仅供测试，暂不支持录像播放。");
     if (result.events.isEmpty()) {
         detail->setText("新库暂无事件。连接和查询已成功，目前没有可显示的数据。");
     }

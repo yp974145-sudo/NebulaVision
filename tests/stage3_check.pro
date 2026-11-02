@@ -1,0 +1,10 @@
+QT += core gui widgets sql
+CONFIG += console c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = stage3_check
+DESTDIR = ../bin
+INCLUDEPATH += ..
+SOURCES += stage3_check.cpp ../view/reviewwidget.cpp ../view/datapicker.cpp ../model/recordmodel.cpp ../model/eventrepository.cpp ../util/dbconn.cpp ../util/devdbconnection.cpp
+HEADERS += ../view/reviewwidget.h ../view/datapicker.h ../model/eventrepository.h ../util/devdbconnection.h
+
