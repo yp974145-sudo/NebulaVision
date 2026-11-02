@@ -1,0 +1,18 @@
+USE nebulavision_dev;
+CREATE TABLE IF NOT EXISTS detection_jobs (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ job_key VARCHAR(64) NOT NULL UNIQUE,
+ owner_id BIGINT UNSIGNED NOT NULL,
+ camera_id BIGINT UNSIGNED NOT NULL,
+ recording_id BIGINT UNSIGNED NOT NULL,
+ input_hash CHAR(64) NOT NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'queued',
+ result_json JSON NULL,
+ error_code VARCHAR(64) NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ FOREIGN KEY(owner_id) REFERENCES users(id),
+ FOREIGN KEY(camera_id) REFERENCES cameras(id),
+ FOREIGN KEY(recording_id) REFERENCES recordings(id)
+) ENGINE=InnoDB;
+INSERT IGNORE INTO schema_migrations(version,description) VALUES ('0004','独立检测任务及幂等键');

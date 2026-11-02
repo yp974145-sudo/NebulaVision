@@ -3,6 +3,8 @@
 #include "serverdb.h"
 #include "recorder.h"
 #include "redisclient.h"
+#include "detectionjobs.h"
+#include <QRegularExpression>
 #include <QDir>
 #include <QFile>
 #include <QtConcurrent>
@@ -28,7 +30,7 @@ static QHttpServerResponse fail(const QString &message,int code) {
 // 每个工作请求拥有自己的连接；query必须在这个对象之前销毁。
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
-    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat"};
+    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat","/api/detections/start","/api/detections/job"};
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -236,6 +238,42 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         if(!auth.exec())return fail("recording list failed",500);
         QJsonArray rows;while(auth.next())rows.append(QJsonObject{{"id",auth.value(0).toString()},{"cameraName",auth.value(1).toString()},{"startedAt",auth.value(2).toDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz")},{"endedAt",auth.value(3).toDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz")},{"bytes",double(auth.value(4).toLongLong())},{"status",auth.value(5).toString()}});
         return reply(QJsonObject{{"recordings",rows},{"total",total},{"page",page},{"pages",pages}});
+    }
+
+    if(request.path=="/api/detections/start") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        if(!admin)return fail("detection admin required",403);
+        QString jobKey=request.body.value("jobKey").toString();
+        if(!QRegularExpression("^[A-Za-z0-9_-]{8,64}$").match(jobKey).hasMatch())return fail("invalid job key",400);
+        bool valid=false;qint64 recording=request.body.value("recordingId").toString().toLongLong(&valid);
+        double threshold=request.body.value("threshold").toDouble(.25);QJsonArray roi=request.body.value("roi").toArray();
+        if(!valid || recording<=0 || !qIsFinite(threshold) || threshold<.05 || threshold>.95)return fail("invalid detection parameters",400);
+        if(!roi.isEmpty() && (roi.size()!=4 || !(0<=roi[0].toDouble() && roi[0].toDouble()<roi[2].toDouble() && roi[2].toDouble()<=1 && 0<=roi[1].toDouble() && roi[1].toDouble()<roi[3].toDouble() && roi[3].toDouble()<=1)))return fail("invalid region",400);
+        auth.prepare("SELECT camera_id,object_key,status FROM recordings WHERE id=?");auth.addBindValue(recording);
+        if(!auth.exec() || !auth.next())return fail("recording missing",404);
+        QString camera=auth.value(0).toString();QString filename=auth.value(1).toString();if(auth.value(2).toString()!="ready")return fail("recording not ready",409);
+        if(QFileInfo(filename).fileName()!=filename)return fail("invalid storage key",500);
+        QString path=QDir(config.value("recording_root").toString()).filePath(filename);if(!QFileInfo(path).isFile())return fail("recording file missing",410);
+        QByteArray input=QJsonDocument(QJsonObject{{"recordingId",QString::number(recording)},{"threshold",threshold},{"roi",roi},{"mode",config.value("detection_mode")}}).toJson(QJsonDocument::Compact);
+        QString fingerprint=QString::fromLatin1(QCryptographicHash::hash(input,QCryptographicHash::Sha256).toHex());
+        auth.prepare("SELECT id,input_hash,owner_id,status FROM detection_jobs WHERE job_key=?");auth.addBindValue(jobKey);
+        if(!auth.exec())return fail("job lookup failed",500);
+        if(auth.next()){
+            if(auth.value(1).toString()!=fingerprint || auth.value(2).toLongLong()!=userId)return fail("idempotency key reused with different payload",409);
+            return reply(QJsonObject{{"id",auth.value(0).toString()},{"status",auth.value(3).toString()},{"reused",true}});
+        }
+        auth.exec("SELECT COUNT(*) FROM detection_jobs WHERE status IN ('queued','running')");if(auth.next() && auth.value(0).toInt()>=8)return fail("detection queue full",429);
+        auth.prepare("INSERT INTO detection_jobs(job_key,owner_id,camera_id,recording_id,input_hash,status) VALUES (?,?,?,?,?,'queued')");auth.addBindValue(jobKey);auth.addBindValue(userId);auth.addBindValue(camera);auth.addBindValue(recording);auth.addBindValue(fingerprint);
+        if(!auth.exec())return fail("job collision, retry same key",409);
+        QString id=auth.lastInsertId().toString();DetectionJobs::start(config,id,QString::number(recording),path,float(threshold),roi);
+        return reply(QJsonObject{{"id",id},{"status","queued"}},202);
+    }
+    if(request.path=="/api/detections/job") {
+        bool valid=false;qint64 id=request.query.queryItemValue("id").toLongLong(&valid);if(!valid || id<=0)return fail("invalid job",400);
+        auth.prepare("SELECT owner_id,status,result_json,error_code FROM detection_jobs WHERE id=?");auth.addBindValue(id);
+        if(!auth.exec() || !auth.next())return fail("job missing",404);
+        if(!admin && auth.value(0).toLongLong()!=userId)return fail("job forbidden",403);
+        return reply(QJsonObject{{"id",QString::number(id)},{"status",auth.value(1).toString()},{"result",QJsonDocument::fromJson(auth.value(2).toByteArray()).object()},{"error",auth.value(3).toString()}});
     }
     if(request.method!=QHttpServerRequest::Method::Get)return fail("method not allowed",405);
     QSqlQuery query(connection.db);

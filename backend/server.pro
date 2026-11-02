@@ -12,3 +12,5 @@ SOURCES += recorder.cpp
 HEADERS += recorder.h serverdb.h
 SOURCES += redisclient.cpp
 HEADERS += redisclient.h
+SOURCES += detectionjobs.cpp
+HEADERS += detectionjobs.h

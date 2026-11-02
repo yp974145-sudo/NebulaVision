@@ -1,0 +1,27 @@
+syntax = "proto3";
+package nebulavision;
+service Detector { rpc Detect(DetectRequest) returns (DetectReply); }
+message DetectRequest {
+  string job_id = 1;
+  string media_path = 2;
+  string mode = 3;
+  float threshold = 4;
+  repeated float roi = 5;
+  uint32 test_delay_ms = 6;
+}
+message Detection {
+  int32 class_id = 1;
+  string label = 2;
+  float confidence = 3;
+  float x = 4;
+  float y = 5;
+  float width = 6;
+  float height = 7;
+}
+message DetectReply {
+  string job_id = 1;
+  bool synthetic = 2;
+  string model_version = 3;
+  repeated Detection detections = 4;
+  bool cache_hit = 5;
+}

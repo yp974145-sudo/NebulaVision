@@ -19,6 +19,7 @@ int main(int argc,char **argv) {
         // 已独占监听端口后才恢复旧任务，防止第二个实例干扰正在录制的实例。
         ServerDb db(doc.object());QSqlQuery recovery(db.db);
         recovery.exec("UPDATE recordings SET status='interrupted' WHERE status='writing'");
+        recovery.exec("UPDATE detection_jobs SET status='failed',error_code='SERVER_RESTARTED' WHERE status IN ('queued','running')");
     }
     int result=app.exec();
     QThreadPool::globalInstance()->waitForDone();
