@@ -1,4 +1,5 @@
 #include "apiserver.h"
+#include "mediaadapter.h"
 #include <QtConcurrent>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -39,7 +40,7 @@ public:
 };
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
-    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me"};
+    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth"};
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -61,6 +62,32 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     ServerDb connection(config);
     if(!connection.db.isOpen())return fail("database unavailable",503);
     QSqlQuery auth(connection.db);
+    if(request.path=="/internal/media/auth") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        QString token=request.body.value("token").toString();
+        if(token.isEmpty()) token=QUrlQuery(request.body.value("query").toString()).queryItemValue("token");
+        QJsonObject claims=MediaAdapter::verify(token,config.value("media_secret").toString());
+        if(claims.isEmpty())return fail("media authentication required",401);
+        if(claims.value("action")!=request.body.value("action") || claims.value("path")!=request.body.value("path"))return fail("media scope forbidden",403);
+        qint64 owner=0;
+        {
+            QMutexLocker lock(&sessionMutex);
+            auto session=sessions.value(claims.value("session").toString());
+            if(session.second<QDateTime::currentDateTimeUtc())return fail("media session expired",401);
+            owner=session.first;
+        }
+        auth.prepare("SELECT status FROM users WHERE id=?");auth.addBindValue(owner);
+        if(!auth.exec() || !auth.next() || auth.value(0).toString()!="active")return fail("media account disabled",403);
+        auth.prepare("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=? AND r.code='admin'");auth.addBindValue(owner);
+        bool ownerAdmin=auth.exec() && auth.next();
+        if(claims.value("action").toString()=="publish" && !ownerAdmin)return fail("publish forbidden",403);
+        if(!ownerAdmin) {
+            auth.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");auth.addBindValue(owner);auth.addBindValue(claims.value("cameraId").toString());
+            if(!auth.exec() || !auth.next())return fail("media camera forbidden",403);
+        }
+        return reply(QJsonObject{{"expireAt",QDateTime::fromSecsSinceEpoch(qint64(claims.value("expires").toDouble()),Qt::UTC).toString(Qt::ISODate)}});
+    }
+
     if(request.path=="/api/login") {
         if(request.method!=QHttpServerRequest::Method::Post)return fail("method not allowed",405);
         QString username=request.body.value("username").toString();
@@ -121,6 +148,29 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     auth.prepare("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=? AND r.code='admin'");auth.addBindValue(userId);
     bool admin=auth.exec() && auth.next();
     if(request.path=="/api/me")return reply(QJsonObject{{"id",QString::number(userId)},{"admin",admin}});
+
+    if(request.path=="/api/media/play" || request.path=="/api/media/publish") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        bool publishing=request.path.endsWith("publish");
+        if(publishing && !admin)return fail("publish forbidden",403);
+        bool valid=false;qint64 camera=request.body.value("cameraId").toString().toLongLong(&valid);
+        if(!valid || camera<=0)return fail("invalid camera",400);
+        auth.prepare("SELECT camera_key,enabled FROM cameras WHERE id=?");auth.addBindValue(camera);
+        if(!auth.exec() || !auth.next())return fail("camera missing",404);
+        QString path=auth.value(0).toString();
+        if(!auth.value(1).toBool())return fail("camera disabled",409);
+        if(!admin) {
+            auth.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");auth.addBindValue(userId);auth.addBindValue(camera);
+            if(!auth.exec() || !auth.next())return fail("camera forbidden",403);
+        }
+        QDateTime expires=QDateTime::currentDateTimeUtc().addSecs(3600);
+        {QMutexLocker lock(&sessionMutex);expires=qMin(expires,sessions.value(key).second);}
+        QJsonObject claims{{"session",key},{"cameraId",QString::number(camera)},{"path",path},
+            {"action",publishing?"publish":"read"},{"expires",double(expires.toSecsSinceEpoch())}};
+        QString token=MediaAdapter::sign(claims,config.value("media_secret").toString());
+        QString url="rtsp://127.0.0.1:18554/"+path+"?token="+token;
+        return reply(QJsonObject{{"url",url},{"expiresAt",expires.toString(Qt::ISODate)}});
+    }
     if(request.method!=QHttpServerRequest::Method::Get)return fail("method not allowed",405);
     QSqlQuery query(connection.db);
     if(request.path=="/api/cameras") {

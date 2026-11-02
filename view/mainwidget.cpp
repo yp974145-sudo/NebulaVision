@@ -124,6 +124,8 @@ void MainWidget::to_login_win()
 void MainWidget::showUsername(const QString &username)
 {
     lab_login->setText(username);
+    MonitorWidget *monitor=findChild<MonitorWidget *>();
+    if(monitor)monitor->refreshDevices();
     this->show();
 }
 

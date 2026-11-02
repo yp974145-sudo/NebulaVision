@@ -13,6 +13,7 @@ public:
     ~MonitorWidget() override;
     void openSource(int channel, const QString &source);
     void stopAll();
+    void refreshDevices();
 public slots:
     void switch_to_channel1();
     void switch_to_channel4();
@@ -20,6 +21,8 @@ private:
     void updateLayout();
     QGridLayout *grid;
     QListWidget *channelList;
+    QListWidget *deviceList;
+    QLabel *deviceStatus;
     QWidget *tiles[4];
     FfmpegPlayer *players[4];
     int selectedChannel = 0;

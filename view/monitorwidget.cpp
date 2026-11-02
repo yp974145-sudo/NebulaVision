@@ -6,6 +6,10 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QFile>
+#include "../service/apiclient.h"
+#include <QFutureWatcher>
+#include <QtConcurrent>
+#include <QJsonArray>
 
 MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
 {
@@ -22,6 +26,23 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     for (int i=0;i<4;i++) channelList->addItem(QString("预览通道 %1").arg(i+1));
     channelList->setCurrentRow(0);
     leftLayout->addWidget(channelList);
+    leftLayout->addWidget(new QLabel("服务端摄像头（双击打开）"));
+    deviceList=new QListWidget(left);
+    deviceStatus=new QLabel("登录后刷新设备",left);deviceStatus->setWordWrap(true);
+    QPushButton *refresh=new QPushButton("刷新设备",left);
+    leftLayout->addWidget(deviceList);leftLayout->addWidget(deviceStatus);leftLayout->addWidget(refresh);
+    connect(refresh,&QPushButton::clicked,this,&MonitorWidget::refreshDevices);
+    connect(deviceList,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem *item) {
+        QString camera=item->data(Qt::UserRole).toString();int channel=selectedChannel;
+        struct Result {QJsonObject data;QString error;};
+        QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
+        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,channel]() {
+            Result result=watcher->result();watcher->deleteLater();
+            if(!result.error.isEmpty()){deviceStatus->setText(result.error);return;}
+            openSource(channel,result.data.value("url").toString());
+        });
+        watcher->setFuture(QtConcurrent::run([camera](){Result result;result.data=ApiClient::request("/api/media/play",QJsonObject{{"cameraId",camera}},true,&result.error);return result;}));
+    });
     mainLayout->addWidget(left,1);
 
     QWidget *right = new QWidget(this);
@@ -120,4 +141,23 @@ void MonitorWidget::updateLayout()
     }
     grid->setRowStretch(0,1);grid->setColumnStretch(0,1);
     grid->setRowStretch(1,fourViews?1:0);grid->setColumnStretch(1,fourViews?1:0);
+}
+
+void MonitorWidget::refreshDevices()
+{
+    deviceStatus->setText("正在读取服务端设备……");
+    struct Result {QJsonObject data;QString error;};
+    QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
+    connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher]() {
+        Result result=watcher->result();watcher->deleteLater();deviceList->clear();
+        if(!result.error.isEmpty()){deviceStatus->setText(result.error);return;}
+        QJsonArray devices=result.data.value("cameras").toArray();
+        for(int i=0;i<devices.size();i++) {
+            QJsonObject camera=devices[i].toObject();
+            QListWidgetItem *item=new QListWidgetItem(camera.value("name").toString(),deviceList);
+            item->setData(Qt::UserRole,camera.value("id").toString());
+        }
+        deviceStatus->setText(QString("可访问设备 %1 个").arg(devices.size()));
+    });
+    watcher->setFuture(QtConcurrent::run([](){Result result;result.data=ApiClient::request("/api/cameras",{},false,&result.error);return result;}));
 }

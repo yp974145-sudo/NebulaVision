@@ -6,3 +6,5 @@ TARGET = nebulavision_server
 DESTDIR = $$PWD/../bin-qt6
 SOURCES += main.cpp apiserver.cpp
 HEADERS += apiserver.h
+SOURCES += mediaadapter.cpp
+HEADERS += mediaadapter.h
