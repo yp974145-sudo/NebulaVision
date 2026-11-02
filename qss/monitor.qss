@@ -1,0 +1,14 @@
+*{ margin:0; padding:0; }
+#left_box{ border-right:2px solid white; min-width:200px; }
+#device_list{ color:white; font-size:20pt; font-weight:bold; border:none; border-bottom:2px solid white; padding-bottom:10px; }
+QListWidget{ background-color:#f5f5f5; border:none; padding:5px; outline:none; font-size:14pt; }
+QListWidget::item{ height:42px; padding:0 12px; color:black; font-size:14pt; }
+QListWidget::item:hover{ background-color:#D9D9D9; color:#404244; }
+QListWidget::item:selected{ background-color:#CCE8FF; color:#404244; border-left:3px solid #1a73e8; }
+QListWidget::item:selected:hover{ background-color:#c7dafc; }
+QListWidget:disabled{ background-color:#f0f0f0; border-color:#e0e0e0; }
+QListWidget:disabled::item{ color:#b0b0b0; background-color:transparent; }
+QListWidget::item:alternate{ background-color:#f0f0f0; }
+QListWidget QScrollBar:vertical{ width:0px; background-color:transparent; margin:0; }
+QListWidget QScrollBar:horizontal{ height:0px; }
+QListWidget QScrollBar::handle, QListWidget QScrollBar::add-line, QListWidget QScrollBar::sub-line, QListWidget QScrollBar::add-page, QListWidget QScrollBar::sub-page{ background:transparent; }

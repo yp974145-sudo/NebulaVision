@@ -1,0 +1,12 @@
+{
+  "environment": "development",
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "name": "nebulavision_dev",
+    "user": "nebulavision_app",
+    "password_env": "NEBULAVISION_DB_PASSWORD",
+    "required_name": "nebulavision_dev"
+  },
+  "media": { "storage_root": "./data/recordings" }
+}

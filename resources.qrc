@@ -1,0 +1,18 @@
+<RCC>
+    <qresource prefix="/">
+        <file>img/camera.png</file>
+        <file>img/e33a1b4319df49871b92f8b8cd82c6f2.png</file>
+        <file>img/单窗口.png</file>
+        <file>img/多窗口0.png</file>
+        <file>img/设置.png</file>
+        <file>img/摄像头.png</file>
+        <file>img/摄像头_关闭.png</file>
+        <file>img/视频回放.png</file>
+        <file>img/四窗口.png</file>
+        <file>img/未登录-头像.png</file>
+        <file>img/一窗口.png</file>
+        <file>qss/login_reg.qss</file>
+        <file>qss/main.qss</file>
+        <file>qss/monitor.qss</file>
+    </qresource>
+</RCC>

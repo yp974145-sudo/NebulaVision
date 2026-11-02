@@ -1,0 +1,71 @@
+-- 只允许在独立开发库执行，不导入原项目数据。
+USE nebulavision_dev;
+CREATE TABLE IF NOT EXISTS roles (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ code VARCHAR(32) NOT NULL UNIQUE,
+ name VARCHAR(64) NOT NULL
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS users (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ username VARCHAR(64) NOT NULL UNIQUE,
+ password_hash VARCHAR(255) NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'disabled',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ last_login_at DATETIME NULL
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS user_roles (
+ user_id BIGINT UNSIGNED NOT NULL,
+ role_id BIGINT UNSIGNED NOT NULL,
+ PRIMARY KEY(user_id,role_id),
+ FOREIGN KEY(user_id) REFERENCES users(id),
+ FOREIGN KEY(role_id) REFERENCES roles(id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS cameras (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ camera_key VARCHAR(64) NOT NULL UNIQUE,
+ name VARCHAR(128) NOT NULL,
+ stream_url VARCHAR(1024) NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'offline',
+ enabled BOOLEAN NOT NULL DEFAULT FALSE,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS recordings (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ camera_id BIGINT UNSIGNED NOT NULL,
+ started_at DATETIME(3) NOT NULL,
+ ended_at DATETIME(3) NULL,
+ object_key VARCHAR(512) NOT NULL,
+ bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+ status VARCHAR(16) NOT NULL DEFAULT 'writing',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(camera_id) REFERENCES cameras(id),
+ INDEX idx_recordings_camera_time(camera_id,started_at,id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS events (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ event_key VARCHAR(128) NOT NULL UNIQUE,
+ camera_id BIGINT UNSIGNED NOT NULL,
+ occurred_at DATETIME(3) NOT NULL,
+ event_type VARCHAR(64) NOT NULL,
+ description VARCHAR(512) NOT NULL,
+ confidence DECIMAL(5,4) NULL,
+ model_version VARCHAR(64) NULL,
+ recording_id BIGINT UNSIGNED NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'new',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY(camera_id) REFERENCES cameras(id),
+ FOREIGN KEY(recording_id) REFERENCES recordings(id),
+ INDEX idx_events_camera_time(camera_id,occurred_at,id)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS audit_logs (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ actor_id BIGINT UNSIGNED NULL,
+ action VARCHAR(64) NOT NULL,
+ resource_type VARCHAR(64) NOT NULL,
+ resource_id VARCHAR(64) NULL,
+ request_id VARCHAR(64) NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ INDEX idx_audit_time(created_at,id)
+) ENGINE=InnoDB;
+INSERT IGNORE INTO roles(code,name) VALUES ('admin','管理员'),('operator','操作员'),('viewer','只读用户');
+INSERT IGNORE INTO schema_migrations(version,description) VALUES ('0002','基础用户角色、摄像头、录像、事件、审计表');

@@ -1,0 +1,27 @@
+# 编译输出
+/bin/
+/build/
+/build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+*.o
+*.obj
+*.exe
+*.dll
+*.pdb
+*.ilk
+
+# Qt Creator个人配置
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user*
+
+# 本地密码与环境配置
+.env
+.env.*
+!.env.example
+*.local.ini
+*.local.json
+
+# 日志
+*.log

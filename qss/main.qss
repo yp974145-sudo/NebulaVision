@@ -1,0 +1,14 @@
+QWidget{ background-color:#3B3F48; }
+#login_lab, #title, #ctime{ color:white; font-size:20pt; font-weight:bold; margin:10px; }
+#title{ font-size:30pt; }
+#login_lab{ font-size:14pt; }
+QPushButton{ color:white; background-color:black; padding:10px 16px; border-radius:10px; font-size:16pt; font-family:"Microsoft YaHei"; }
+QPushButton:hover{ background-color:#222222; }
+QPushButton:pressed{ background-color:#444444; }
+QPushButton:disabled{ color:#888888; background-color:#333333; }
+#review_info, #review_detail{ color:#e6e6e6; font-size:13pt; }
+QTableWidget{ background-color:#2f333b; alternate-background-color:#353a42; color:#e6e6e6; gridline-color:#4a4f59; border:1px solid #4a4f59; border-radius:6px; font-size:13pt; }
+QHeaderView::section{ background-color:#22252b; color:#ffffff; padding:8px 10px; border:none; border-right:1px solid #4a4f59; font-size:13pt; font-weight:bold; }
+QTableWidget::item:selected{ background-color:#1890ff; color:#ffffff; }
+QComboBox, QSpinBox{ color:#ffffff; background-color:#000000; border-radius:8px; padding:6px 12px; font-size:13pt; }
+QComboBox QAbstractItemView{ background-color:#22252b; color:#ffffff; selection-background-color:#1890ff; font-size:13pt; }

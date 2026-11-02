@@ -1,0 +1,7 @@
+QPushButton { color:white; background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #62c5f4,stop:1 #1890ff); border:none; border-radius:8px; padding:6px 20px; font-size:16pt; }
+QPushButton:hover { background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #81d3f7,stop:1 #39a9ff); }
+QPushButton:pressed { background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1890ff,stop:1 #1073c7); }
+QLineEdit { border:1px solid #d0d0d0; border-radius:6px; padding:6px 10px; background:#ffffff; color:#202020; font-size:16pt; }
+QLineEdit:hover { border-color:#b0b0b0; }
+QLineEdit:focus { border:2px solid #0078d4; padding:5px 9px; }
+QLineEdit#edit_vcode { font-size:12pt; padding:4px 6px; }
