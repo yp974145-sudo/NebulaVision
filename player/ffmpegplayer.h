@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <atomic>
 #include <QTimer>
+#include <QMutex>
 
 // FFmpeg在独立子进程解码，工作线程负责读取固定大小的RGB帧。
 class DecodeTask : public QThread
@@ -15,14 +16,20 @@ public:
     DecodeTask(const QString &source, const QString &executable, QObject *parent=nullptr);
     void requestStop();
     void setPaused(bool paused);
+    bool takeFrame(QImage *frame);
+    int queuedFrames();
+    int droppedFrames();
 signals:
-    void frameReady(const QImage &frame);
     void failed(const QString &message);
 protected:
     void run() override;
 private:
     QString source;
     QString executable;
+    QMutex frameMutex;
+    QImage latestFrame;
+    bool hasFrame = false;
+    int dropped = 0;
     std::atomic<bool> stopping;
     std::atomic<bool> paused;
 };
@@ -39,6 +46,8 @@ public:
     void resume() override;
     void stop() override;
     static QString ffmpegExecutable();
+    int queuedFrames() const;
+    int droppedFrames() const;
 signals:
     void retryScheduled(int milliseconds);
     void frameDisplayed(); // 用于观测实际收到并显示的帧。
@@ -46,6 +55,8 @@ private:
     void startDecoding();
     void clearTask();
     QTimer retryTimer;
+    QTimer renderTimer;
+    bool userPaused = false;
     QString currentSource;
     bool networkSource = false;
     bool enabled = false;

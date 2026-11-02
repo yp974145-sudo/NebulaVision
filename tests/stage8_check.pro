@@ -1,0 +1,9 @@
+QT += core gui widgets
+CONFIG += console c++11
+TEMPLATE = app
+TARGET = stage8_check
+DESTDIR = ../bin
+INCLUDEPATH += ..
+SOURCES += stage8_check.cpp ../player/ffmpegplayer.cpp ../view/monitorwidget.cpp
+HEADERS += ../player/videoplayer.h ../player/ffmpegplayer.h ../view/monitorwidget.h
+RESOURCES += ../resources.qrc

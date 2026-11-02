@@ -11,4 +11,3 @@ HEADERS += ../view/reviewwidget.h ../view/datapicker.h ../model/eventrepository.
 
 SOURCES += ../service/eventquerytask.cpp
 HEADERS += ../service/eventquerytask.h
-

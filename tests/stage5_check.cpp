@@ -39,5 +39,6 @@ int main(int argc,char **argv) {
     QObject::connect(&player,&VideoPlayer::playbackError,[&error](const QString &){error=true;});
     player.open("missing-stage5-file.mp4");
     if(!error) return 6;
+    probe.setSource(static_cast<QMediaObject *>(nullptr));
     return 0;
 }

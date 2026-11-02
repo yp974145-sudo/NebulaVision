@@ -1,163 +1,106 @@
 #include "monitorwidget.h"
-#include "../player/ffmpegplayer.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
 #include <QFileDialog>
 #include <QInputDialog>
-
+#include <QLineEdit>
+#include <QFile>
 
 MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
 {
-    //设置监控窗口主布局为横向布局
-    QHBoxLayout *main_layout=new QHBoxLayout;
-    this->setLayout(main_layout);
+    QHBoxLayout *mainLayout = new QHBoxLayout(this);
+    QWidget *left = new QWidget(this);
+    left->setObjectName("left_box");
+    QVBoxLayout *leftLayout = new QVBoxLayout(left);
+    left->setMinimumWidth(260);
+    QLabel *listTitle = new QLabel("预览通道（尚未接设备管理）");
+    listTitle->setWordWrap(true);
+    leftLayout->addWidget(listTitle);
+    channelList = new QListWidget(left);
+    for (int i=0;i<4;i++) channelList->addItem(QString("预览通道 %1").arg(i+1));
+    channelList->setCurrentRow(0);
+    leftLayout->addWidget(channelList);
+    mainLayout->addWidget(left,1);
 
-    //创建左右两个盒子，放入主布局容器中，左侧窗口站1，右侧窗口6
-    left_widget=new QWidget;
-    left_widget->setObjectName("left_box");
-    main_layout->addWidget(left_widget,1);
-    right_widget=new QWidget;
-    main_layout->addWidget(right_widget,6);
-
-    //初始化左窗口
-    this->init_leftWidget();
-
-    this->init_qss();
-    this->init_rightwidget();
-    this->init_connect();
-}
-
-void MonitorWidget::init_leftWidget()
-{
-     //设置左窗口对象名，用于样式设置
-    QVBoxLayout *left_layout=new QVBoxLayout;
-    left_widget->setLayout(left_layout);
-
-    QLabel *lab_devicelist=new QLabel("设备列表");
-    lab_devicelist->setObjectName("device_list");
-    lab_devicelist->setAlignment(Qt::AlignCenter);
-    left_layout->addWidget(lab_devicelist);
-
-    //创建列表容器，用于展示设备列表
-    QListWidget *device_list=new QListWidget;
-    left_layout ->addWidget(device_list);
-    device_list->addItem(new QListWidgetItem(QIcon(":/img/camera.png"),"xxxxxxxxxx"));
-    device_list->addItem(new QListWidgetItem(QIcon(":/img/camera.png"),"zzzzzzzzzz"));
-    device_list->addItem(new QListWidgetItem(QIcon(":/img/camera.png"),"yyyyyyyyyy"));
-    device_list->addItem(new QListWidgetItem(QIcon(":/img/camera.png"),"ccccccccccc"));
-
-    left_layout->addStretch();
-}
-
-void MonitorWidget::init_qss()
-{
-    QFile file(":/qss/monitor.qss");
-    if(file.open(QFile::ReadOnly)){
-        this->setStyleSheet(file.readAll());
-        file.close();
-    }
-}
-
-void MonitorWidget::init_rightwidget()
-{
-    //上方是视频监控区，下方是操作按钮，设为垂直布局
-    QVBoxLayout* right_layout=new QVBoxLayout;
-    right_widget->setLayout(right_layout);
-
-    //设置上方监控视频区为堆叠布局
-    video_layout=new QStackedLayout;
-
-    //创捷单通道窗口
-    QWidget *w1=new QWidget;
-    video_layout->addWidget(w1);
-
-    //创建四通道
-    QWidget *w4=new QWidget;
-    video_layout->addWidget(w4);
-    right_layout->addLayout(video_layout,8);
-
-    //初始化单通道窗口
-    QVBoxLayout *w1_layout=new QVBoxLayout;
-    w1->setLayout(w1_layout);
-    player = new FfmpegPlayer(w1);
-    w1_layout->addWidget(player->videoWidget());
-    playStatus = new QLabel("选择本地视频开始播放");
-    right_layout->addWidget(playStatus);
-    QHBoxLayout *playButtons = new QHBoxLayout;
-    QPushButton *open = new QPushButton("打开视频");
-    QPushButton *openStream = new QPushButton("打开RTSP");
-    QPushButton *pause = new QPushButton("暂停");
-    QPushButton *resume = new QPushButton("继续");
-    QPushButton *stop = new QPushButton("停止");
-    playButtons->addWidget(open);
-    playButtons->addWidget(openStream);
-    playButtons->addWidget(pause);
-    playButtons->addWidget(resume);
-    playButtons->addWidget(stop);
-    right_layout->addLayout(playButtons);
-    connect(open, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getOpenFileName(this, "选择本地视频", QString(), "视频 (*.mp4 *.avi *.mkv *.wmv);;所有文件 (*)");
-        if (!path.isEmpty()) {
-            switch_to_channel1();
-            player->open(path);
-        }
-    });
-    connect(openStream, &QPushButton::clicked, this, [this]() {
-        bool accepted = false;
-        QString url = QInputDialog::getText(this,"RTSP预览","输入RTSP地址（仅本次使用）",QLineEdit::Normal,
-                                            "rtsp://127.0.0.1:8554/demo",&accepted);
-        if (accepted && !url.trimmed().isEmpty()) {
-            switch_to_channel1();
-            player->open(url.trimmed());
-        }
-    });
-    connect(pause, &QPushButton::clicked, player, &VideoPlayer::pause);
-    connect(resume, &QPushButton::clicked, player, &VideoPlayer::resume);
-    connect(stop, &QPushButton::clicked, player, &VideoPlayer::stop);
-    connect(player, &VideoPlayer::statusChanged, playStatus, &QLabel::setText);
-    connect(player, &VideoPlayer::playbackError, playStatus, &QLabel::setText);
-    //初始化四窗口
-    int x=0,y=0;
-    QGridLayout *w4_layout=new QGridLayout;
-    w4->setLayout(w4_layout);
+    QWidget *right = new QWidget(this);
+    QVBoxLayout *rightLayout = new QVBoxLayout(right);
+    grid = new QGridLayout;
+    rightLayout->addLayout(grid,1);
+    mainLayout->addWidget(right,6);
+    // 四个通道各有自己的线程、进程和容量1帧缓存，不共用停止标志。
     for (int i=0;i<4;i++) {
-        lab_videos[i]=new QLabel;
-        lab_videos[i]->setPixmap(QPixmap(":/img/摄像头_关闭.png"));
-        lab_videos[i]->setScaledContents(true);//内容随窗口缩放
-        lab_videos[i]->setAlignment(Qt::AlignCenter);//设置内容居中
-        switch (i) {
-            case 0:x=y=0;break;
-            case 1:x=0;y=1;break;
-            case 2:x=1;y=0;break;
-            case 3:x=1;y=1;break;
-        }
-        w4_layout->addWidget(lab_videos[i],x,y);
+        tiles[i] = new QWidget(right);
+        QVBoxLayout *tileLayout = new QVBoxLayout(tiles[i]);
+        tileLayout->addWidget(new QLabel(QString("通道 %1").arg(i+1)));
+        players[i] = new FfmpegPlayer(tiles[i]);
+        players[i]->setObjectName(QString("previewPlayer%1").arg(i));
+        tileLayout->addWidget(players[i]->videoWidget(),1);
+        QLabel *status = new QLabel("未打开视频",tiles[i]);
+        status->setWordWrap(true);
+        tileLayout->addWidget(status);
+        connect(players[i],&VideoPlayer::statusChanged,status,&QLabel::setText);
+        connect(players[i],&VideoPlayer::playbackError,status,&QLabel::setText);
     }
-
-    //设置下方按钮区为水平布局
-    QHBoxLayout *btn_layout=new QHBoxLayout;
-    btn_channel1=new QPushButton(QIcon(":/img/单窗口.png"),"");
-    btn_channel4=new QPushButton(QIcon(":/img/多窗口0.png"),"");
-    btn_channel1->setIconSize(QSize(80,80));
-    btn_channel4->setIconSize(QSize(80,80));
-    btn_layout->addWidget(btn_channel1);
-    btn_layout->addWidget(btn_channel4);
-    btn_layout->addStretch();
-    btn_layout->setSpacing(30);
-    right_layout->addLayout(btn_layout,1);
+    QHBoxLayout *buttons = new QHBoxLayout;
+    QPushButton *single = new QPushButton("单画面");
+    QPushButton *four = new QPushButton("四画面");
+    QPushButton *open = new QPushButton("打开本地视频");
+    QPushButton *stream = new QPushButton("打开RTSP");
+    QPushButton *pause = new QPushButton("暂停当前");
+    QPushButton *resume = new QPushButton("继续当前");
+    QPushButton *stop = new QPushButton("停止当前");
+    QPushButton *stopAllButton = new QPushButton("全部停止");
+    buttons->addWidget(single); buttons->addWidget(four);
+    buttons->addWidget(open); buttons->addWidget(stream);
+    buttons->addWidget(pause); buttons->addWidget(resume);
+    buttons->addWidget(stop); buttons->addWidget(stopAllButton);
+    rightLayout->addLayout(buttons);
+    rightLayout->addWidget(new QLabel("先在左侧选择通道再打开视频。预览为静音；切换布局保留各通道播放。"));
+    connect(single,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel1);
+    connect(four,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel4);
+    connect(channelList,&QListWidget::currentRowChanged,this,[this](int row){
+        if(row>=0 && row<4) {selectedChannel=row;updateLayout();}
+    });
+    connect(open,&QPushButton::clicked,this,[this](){
+        QString path=QFileDialog::getOpenFileName(this,"打开当前通道视频",QString(),"视频 (*.mp4 *.avi *.mkv *.wmv);;全部文件 (*)");
+        if(!path.isEmpty()) openSource(selectedChannel,path);
+    });
+    connect(stream,&QPushButton::clicked,this,[this](){
+        bool accepted=false;
+        QString url=QInputDialog::getText(this,"打开当前通道RTSP","地址仅用于本次预览",QLineEdit::Normal,
+                                         "rtsp://127.0.0.1:18554/demo",&accepted);
+        if(accepted && !url.trimmed().isEmpty()) openSource(selectedChannel,url.trimmed());
+    });
+    connect(pause,&QPushButton::clicked,this,[this](){players[selectedChannel]->pause();});
+    connect(resume,&QPushButton::clicked,this,[this](){players[selectedChannel]->resume();});
+    connect(stop,&QPushButton::clicked,this,[this](){players[selectedChannel]->stop();});
+    connect(stopAllButton,&QPushButton::clicked,this,&MonitorWidget::stopAll);
+    QFile qss(":/qss/monitor.qss");
+    if(qss.open(QIODevice::ReadOnly)) setStyleSheet(qss.readAll());
+    updateLayout();
 }
-
-void MonitorWidget::init_connect()
+void MonitorWidget::openSource(int channel,const QString &source)
 {
-    connect(btn_channel1,SIGNAL(clicked()),this,SLOT(switch_to_channel1()));
-    connect(btn_channel4,SIGNAL(clicked()),this,SLOT(switch_to_channel4()));
+    if(channel<0 || channel>=4) return;
+    players[channel]->open(source);
 }
-
-void MonitorWidget::switch_to_channel1()
+void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop(); }
+MonitorWidget::~MonitorWidget() { stopAll(); }
+void MonitorWidget::switch_to_channel1() { fourViews=false;updateLayout(); }
+void MonitorWidget::switch_to_channel4() { fourViews=true;updateLayout(); }
+void MonitorWidget::updateLayout()
 {
-    video_layout->setCurrentIndex(0);
+    // 复用同一组显示控件，切布局不新建播放器，也不重复解码。
+    for(int i=0;i<4;i++) {
+        grid->removeWidget(tiles[i]);
+        bool visible = fourViews || i==selectedChannel;
+        tiles[i]->setVisible(visible);
+        if(visible) {
+            if(fourViews) grid->addWidget(tiles[i],i/2,i%2);
+            else grid->addWidget(tiles[i],0,0);
+        }
+    }
+    grid->setRowStretch(0,1);grid->setColumnStretch(0,1);
+    grid->setRowStretch(1,fourViews?1:0);grid->setColumnStretch(1,fourViews?1:0);
 }
-
-void MonitorWidget::switch_to_channel4()
-{
-    video_layout->setCurrentIndex(1);
-}
-

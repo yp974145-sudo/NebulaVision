@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QElapsedTimer>
 #include <QUrl>
+#include <QMutexLocker>
 
 DecodeTask::DecodeTask(const QString &source, const QString &executable, QObject *parent)
     : QThread(parent), stopping(false), paused(false)
@@ -15,6 +16,17 @@ DecodeTask::DecodeTask(const QString &source, const QString &executable, QObject
 }
 void DecodeTask::requestStop() { stopping.store(true); }
 void DecodeTask::setPaused(bool value) { paused.store(value); }
+bool DecodeTask::takeFrame(QImage *frame)
+{
+    QMutexLocker lock(&frameMutex);
+    if (!hasFrame) return false;
+    *frame = latestFrame;
+    latestFrame = QImage();
+    hasFrame = false;
+    return true;
+}
+int DecodeTask::queuedFrames() { QMutexLocker lock(&frameMutex); return hasFrame ? 1 : 0; }
+int DecodeTask::droppedFrames() { QMutexLocker lock(&frameMutex); return dropped; }
 void DecodeTask::run()
 {
     QProcess process; // 在工作线程创建和销毁，不跨线程调用QProcess。
@@ -58,7 +70,13 @@ void DecodeTask::run()
         if (buffer.size() == frameBytes) {
             // QImage默认引用buffer内存，copy后帧拥有自己的数据，才能跨线程传递。
             QImage frame(reinterpret_cast<const uchar *>(buffer.constData()), width, height, width*3, QImage::Format_RGB888);
-            emit frameReady(frame.copy());
+            {
+                // 容量1的最新帧缓存：界面来不及显示就覆盖旧帧，不能无限排队。
+                QMutexLocker lock(&frameMutex);
+                if (hasFrame) ++dropped;
+                latestFrame = frame.copy();
+                hasFrame = true;
+            }
             receivedFrame = true;
             buffer.clear();
         }
@@ -96,6 +114,16 @@ FfmpegPlayer::FfmpegPlayer(QWidget *parent) : VideoPlayer(parent)
     surface->setMinimumSize(320,180);
     surface->setText("FFmpeg视频画面");
     surface->setStyleSheet("background:#111;color:white;");
+    renderTimer.setInterval(33);
+    connect(&renderTimer,&QTimer::timeout,this,[this]() {
+        if (!enabled || !task || userPaused) return;
+        QImage frame;
+        if (!task->takeFrame(&frame)) return;
+        retryCount = 0;
+        surface->setPixmap(QPixmap::fromImage(frame).scaled(surface->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+        emit statusChanged("正在播放（FFmpeg静音预览）");
+        emit frameDisplayed();
+    });
     retryTimer.setSingleShot(true);
     connect(&retryTimer,&QTimer::timeout,this,[this]() {
         if (enabled && networkSource) startDecoding();
@@ -126,6 +154,8 @@ void FfmpegPlayer::open(const QString &source)
         return;
     }
     enabled = true;
+    userPaused = false;
+    renderTimer.start();
     retryCount = 0;
     startDecoding();
 }
@@ -135,13 +165,6 @@ void FfmpegPlayer::startDecoding()
     ++generation;
     int session = generation;
     task = new DecodeTask(currentSource,ffmpegExecutable(),this);
-    connect(task,&DecodeTask::frameReady,this,[this,session](const QImage &frame) {
-        if (session != generation || !enabled) return;
-        retryCount = 0;
-        surface->setPixmap(QPixmap::fromImage(frame).scaled(surface->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
-        emit statusChanged("正在播放（FFmpeg静音预览）");
-        emit frameDisplayed();
-    },Qt::QueuedConnection);
     connect(task,&DecodeTask::failed,this,[this,session](const QString &message) {
         if (session == generation && enabled) emit playbackError(message);
     },Qt::QueuedConnection);
@@ -161,8 +184,8 @@ void FfmpegPlayer::startDecoding()
     task->start();
     emit statusChanged("FFmpeg正在连接（静音预览）");
 }
-void FfmpegPlayer::pause() { if(task) {task->setPaused(true);emit statusChanged("已暂停");} }
-void FfmpegPlayer::resume() { if(task && task->isRunning()) {task->setPaused(false);emit statusChanged("正在播放");} }
+void FfmpegPlayer::pause() { if(task) {userPaused=true;task->setPaused(true);emit statusChanged("已暂停");} }
+void FfmpegPlayer::resume() { if(task && task->isRunning()) {userPaused=false;task->setPaused(false);emit statusChanged("正在播放");} }
 void FfmpegPlayer::clearTask()
 {
     if (task) {
@@ -178,8 +201,12 @@ void FfmpegPlayer::stop()
     enabled = false;
     ++generation; // 已排队的旧帧即使送达，也不能更新新会话。
     retryTimer.stop();
+    renderTimer.stop();
     clearTask();
     surface->clear();
     surface->setText("已停止");
     emit statusChanged("已停止");
 }
+
+int FfmpegPlayer::queuedFrames() const { return task ? task->queuedFrames() : 0; }
+int FfmpegPlayer::droppedFrames() const { return task ? task->droppedFrames() : 0; }
