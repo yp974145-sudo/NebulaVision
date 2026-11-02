@@ -1,0 +1,8 @@
+QT += core network sql httpserver concurrent
+QT -= gui
+CONFIG += console c++17
+TEMPLATE = app
+TARGET = nebulavision_server
+DESTDIR = $$PWD/../bin-qt6
+SOURCES += main.cpp apiserver.cpp
+HEADERS += apiserver.h
