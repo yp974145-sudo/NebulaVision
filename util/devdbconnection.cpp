@@ -101,7 +101,7 @@ bool DevDbConnection::open(const QString &configPath, QString *error)
     db.setUserName(username);
     db.setPassword(password);
     // 连接服务器的超时选项，不是所有SQL查询的超时设置。
-    db.setConnectOptions("MYSQL_OPT_CONNECT_TIMEOUT=3");
+    db.setConnectOptions("MYSQL_OPT_CONNECT_TIMEOUT=3;MYSQL_OPT_READ_TIMEOUT=5;MYSQL_OPT_WRITE_TIMEOUT=5");
 
     // 7. 真正连接MySQL。失败时不把密码写进错误信息。
     bool connected = db.open();

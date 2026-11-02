@@ -17,6 +17,7 @@ public:
             return result;
         }
         QString path = configPath;
+        if (path.isEmpty()) { path = QString::fromUtf8(qgetenv("NEBULAVISION_DEV_CONFIG")); }
         if (path.isEmpty()) {
             QDir directory(QCoreApplication::applicationDirPath());
             path = directory.filePath("../NebulaVision/config/viewer.local.json");

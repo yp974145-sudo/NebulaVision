@@ -8,6 +8,7 @@
 #include <QMessageBox>
 ReviewWidget::ReviewWidget(QWidget *parent, const QString &configPath) : QWidget(parent)
 {
+    qRegisterMetaType<EventResult>("EventResult");
     eventConfigPath = configPath;
     auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(16,16,16,16);
@@ -100,6 +101,7 @@ void ReviewWidget::loadPage()
         loadEvents();
         return;
     }
+    ++eventRequestId; // 切换到旧录像时，使仍在后台执行的新事件结果过期。
     // View 只把查询条件交给 Service，再把返回的这一页显示出来。
     auto result=service.query(typeBox->currentIndex()==1,byDate,selectedDate,page,pageSize->currentText().toInt());
     // 先清掉旧数据，查询失败时就不会还显示上一次的结果。
@@ -151,8 +153,39 @@ void ReviewWidget::loadEvents()
     jump->setEnabled(false);
     jump->blockSignals(false);
 
-    EventResult result = eventService.queryLatest(eventConfigPath, byDate, selectedDate, page,
-                                                        pageSize->currentText().toInt());
+    ++eventRequestId;
+    count->setText("正在查询新库事件……");
+    detail->setText("后台查询中，界面可以继续操作。");
+    // 同时最多一个查询；连点时只记住最新条件，不无限创建线程。
+    if (eventTask == nullptr) {
+        startEventQuery();
+    }
+}
+
+void ReviewWidget::startEventQuery()
+{
+    eventTask = new EventQueryTask(eventConfigPath, byDate, selectedDate, page,
+                                   pageSize->currentText().toInt(), eventRequestId, this);
+    EventQueryTask *task = eventTask;
+    connect(task, &EventQueryTask::resultReady, this, &ReviewWidget::showEvents,
+            Qt::QueuedConnection);
+    connect(task, &QThread::finished, this, [this, task]() {
+        eventTask = nullptr;
+        bool needLatest = task->requestId != eventRequestId;
+        task->deleteLater();
+        if (needLatest && typeBox->currentIndex() == 1) {
+            startEventQuery();
+        }
+    });
+    task->start();
+}
+
+void ReviewWidget::showEvents(int requestId, const EventResult &result)
+{
+    // 旧请求即使后来返回，也不能覆盖用户的新条件或旧录像页面。
+    if (requestId != eventRequestId || typeBox->currentIndex() != 1) {
+        return;
+    }
     if (result.error.isEmpty() == false) {
         count->setText("新库事件加载失败");
         detail->setText(result.error);
@@ -184,5 +217,16 @@ void ReviewWidget::loadEvents()
     detail->setText("按UTC日期查询新库事件。合成事件仅供测试，暂不支持录像播放。");
     if (result.events.isEmpty()) {
         detail->setText("新库暂无事件。连接和查询已成功，目前没有可显示的数据。");
+    }
+}
+ReviewWidget::~ReviewWidget()
+{
+    if (eventTask != nullptr) {
+        // SQL驱动没有在此强制取消查询。先断开回调，再等待有超时的查询结束。
+        // 不使用terminate强杀线程，以免数据库资源在半途被破坏。
+        disconnect(eventTask, nullptr, this, nullptr);
+        eventTask->wait();
+        delete eventTask;
+        eventTask = nullptr;
     }
 }

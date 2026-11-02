@@ -75,3 +75,5 @@ SOURCES += util/devdbconnection.cpp
 HEADERS += util/devdbconnection.h
 SOURCES += model/eventrepository.cpp
 HEADERS += model/eventrepository.h service/eventservice.h
+SOURCES += service/eventquerytask.cpp
+HEADERS += service/eventquerytask.h
