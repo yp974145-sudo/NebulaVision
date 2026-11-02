@@ -1,5 +1,7 @@
 #include "loginwidget.h"
-#include "../service/userservice.h"
+#include "../service/apiclient.h"
+#include <QtConcurrent>
+#include <QFutureWatcher>
 #include "../util/winmanager.h"
 
 
@@ -18,7 +20,7 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QVBoxLayout *main_layout=new QVBoxLayout;
     this->setLayout(main_layout);
 
-    QLabel *lab_title=new QLabel("XX系统登录窗口");
+    QLabel *lab_title=new QLabel("NebulaVision 服务端登录");
     lab_title->setFont(QFont("宋体",20,QFont::Bold));
     lab_title->setAlignment(Qt::AlignCenter);//设置对齐方式为水平+垂直居中
 
@@ -29,6 +31,7 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QFormLayout *form_layout=new QFormLayout;
     edit_user=new QLineEdit;
     ediy_pwd=new QLineEdit;
+    ediy_pwd->setEchoMode(QLineEdit::Password);
     form_layout->addRow("用户名：",edit_user);
     form_layout->addRow("密码",ediy_pwd);
 
@@ -50,10 +53,8 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QHBoxLayout* btn_layout=new QHBoxLayout;
     btn_login=new QPushButton("登录");
     QPushButton* btn_reg=new QPushButton("注册");
-    connect(btn_reg,&QPushButton::clicked,this,[this]{
-        WinManager::getInstence()->registerWidget.show();
-        this->hide();
-    });
+    btn_reg->setText("账号由管理员创建");
+    btn_reg->setEnabled(false); // 不再走旧库注册写入。
     QPushButton* btn_cancel=new QPushButton("取消");
     btn_layout->addWidget(btn_login);
     btn_layout->addWidget(btn_reg);
@@ -107,20 +108,24 @@ void LoginWidget::login()
         return;
     }
 
-    // 验证码通过后，再让业务层验证账号密码，窗口里不直接查数据库。
-    UserService userService;
-    bool result = userService.login(username, password);
-    if (result) {
-        // 通过窗口管理器找到原来的主窗口，显示用户名后收起登录窗口。
+    // HTTP登录放到工作线程，避免等待网络时卡住登录窗口。
+    struct LoginResult {QJsonObject data;QString error;};
+    btn_login->setEnabled(false);
+    ediy_pwd->clear();
+    QFutureWatcher<LoginResult> *watcher=new QFutureWatcher<LoginResult>(this);
+    connect(watcher,&QFutureWatcher<LoginResult>::finished,this,[this,watcher,username]() {
+        LoginResult result=watcher->result();watcher->deleteLater();btn_login->setEnabled(true);
+        if(!result.error.isEmpty() || result.data.value("token").toString().isEmpty()) {
+            QMessageBox::warning(this,"登录失败",result.error.isEmpty()?"服务端响应无令牌":result.error);
+            vcode_label->refresh();edit_vcode->clear();return;
+        }
+        ApiSession::setToken(result.data.value("token").toString());
         WinManager::getInstence()->mainWidget.showUsername(username);
-        this->hide();
-    } else {
-        QMessageBox::warning(this,"登录警告",userService.lastError());
-        ediy_pwd->clear();
-        edit_vcode->clear();
-        vcode_label->refresh();
-        edit_user->setFocus();
-    }
-
+        hide();
+    });
+    watcher->setFuture(QtConcurrent::run([username,password]() {
+        LoginResult result;
+        result.data=ApiClient::request("/api/login",QJsonObject{{"username",username},{"password",password}},true,&result.error);
+        return result;
+    }));
 }
-

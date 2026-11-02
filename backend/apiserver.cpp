@@ -8,6 +8,9 @@
 #include <QUuid>
 #include <QHostAddress>
 #include <QFileInfo>
+#include <QPasswordDigestor>
+#include <QRandomGenerator>
+#include <QMutexLocker>
 
 using Status=QHttpServerResponder::StatusCode;
 static QHttpServerResponse reply(const QJsonObject &data,int code=200) {
@@ -36,7 +39,7 @@ public:
 };
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
-    QStringList paths={"/api/events","/api/cameras"};
+    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me"};
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -55,16 +58,88 @@ bool ApiServer::listen() {
     return http.bind(&tcp);
 }
 QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
-    if(request.method!=QHttpServerRequest::Method::Get)return fail("method not allowed",405);
     ServerDb connection(config);
     if(!connection.db.isOpen())return fail("database unavailable",503);
+    QSqlQuery auth(connection.db);
+    if(request.path=="/api/login") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method not allowed",405);
+        QString username=request.body.value("username").toString();
+        QString password=request.body.value("password").toString();
+        if(username.isEmpty() || username.size()>64 || password.size()>256)return fail("invalid login",400);
+        {
+            QMutexLocker lock(&sessionMutex);
+            qint64 now=QDateTime::currentSecsSinceEpoch();
+            if(loginAttempts.size()>2048)loginAttempts.clear();
+            auto &attempt=loginAttempts[username];
+            if(now-attempt.second>60){attempt.first=0;attempt.second=now;}
+            if(++attempt.first>10)return fail("login rate exceeded",429);
+        }
+        auth.prepare("SELECT id,password_hash,status FROM users WHERE username=?");auth.addBindValue(username);
+        if(!auth.exec())return fail("login unavailable",503);
+        bool found=auth.next();
+        qint64 userId=found?auth.value(0).toLongLong():0;
+        QString stored=found?auth.value(1).toString():QString();
+        bool active=found && auth.value(2).toString()=="active";
+        QStringList parts=stored.split('$');
+        QByteArray salt=parts.size()==4?QByteArray::fromBase64(parts[2].toLatin1()):QByteArray(16,'x');
+        QByteArray expected=parts.size()==4?QByteArray::fromBase64(parts[3].toLatin1()):QByteArray(32,'x');
+        QByteArray derived=QPasswordDigestor::deriveKeyPbkdf2(QCryptographicHash::Sha256,password.toUtf8(),salt,200000,32);
+        unsigned difference=unsigned(derived.size()^expected.size());
+        for(int i=0;i<qMin(derived.size(),expected.size());i++)difference|=unsigned(uchar(derived[i])^uchar(expected[i]));
+        if(!active || parts.size()!=4 || parts[0]!="pbkdf2_sha256" || parts[1]!="200000" || difference!=0)return fail("invalid credentials",401);
+        QByteArray random(32,0);for(int i=0;i<random.size();i++)random[i]=char(QRandomGenerator::system()->generate()&255);
+        QString token=QString::fromLatin1(random.toBase64(QByteArray::Base64UrlEncoding|QByteArray::OmitTrailingEquals));
+        QString key=QString::fromLatin1(QCryptographicHash::hash(token.toUtf8(),QCryptographicHash::Sha256).toHex());
+        int ttl=qBound(2,config.value("token_ttl_seconds").toInt(3600),86400);
+        {
+            QMutexLocker lock(&sessionMutex);
+            for(auto it=sessions.begin();it!=sessions.end();) {
+                if(it.value().second<QDateTime::currentDateTimeUtc())it=sessions.erase(it);else ++it;
+            }
+            if(sessions.size()>=1024)return fail("session capacity reached",503);
+            sessions[key]={userId,QDateTime::currentDateTimeUtc().addSecs(ttl)};
+        }
+        auth.prepare("UPDATE users SET last_login_at=UTC_TIMESTAMP() WHERE id=?");auth.addBindValue(userId);auth.exec();
+        return reply(QJsonObject{{"token",token},{"username",username},{"expiresIn",ttl}});
+    }
+    if(!request.token.startsWith("Bearer "))return fail("authentication required",401);
+    QString key=QString::fromLatin1(QCryptographicHash::hash(request.token.mid(7).toUtf8(),QCryptographicHash::Sha256).toHex());
+    qint64 userId=0;
+    {
+        QMutexLocker lock(&sessionMutex);
+        if(!sessions.contains(key))return fail("invalid session",401);
+        auto session=sessions.value(key);
+        if(session.second<QDateTime::currentDateTimeUtc()){sessions.remove(key);return fail("expired session",401);}
+        userId=session.first;
+        if(request.path=="/api/logout") {
+            if(request.method!=QHttpServerRequest::Method::Post)return fail("method not allowed",405);
+            sessions.remove(key);return reply(QJsonObject{{"loggedOut",true}});
+        }
+    }
+    auth.prepare("SELECT status FROM users WHERE id=?");auth.addBindValue(userId);
+    if(!auth.exec() || !auth.next() || auth.value(0).toString()!="active")return fail("account disabled",401);
+    auth.prepare("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=? AND r.code='admin'");auth.addBindValue(userId);
+    bool admin=auth.exec() && auth.next();
+    if(request.path=="/api/me")return reply(QJsonObject{{"id",QString::number(userId)},{"admin",admin}});
+    if(request.method!=QHttpServerRequest::Method::Get)return fail("method not allowed",405);
     QSqlQuery query(connection.db);
     if(request.path=="/api/cameras") {
-        if(!query.exec("SELECT id,name,status,enabled FROM cameras ORDER BY id"))return fail("camera query failed",500);
+        if(!query.exec(QString("SELECT id,name,status,enabled FROM cameras c %1 ORDER BY id").arg(admin?QString():QString("WHERE EXISTS(SELECT 1 FROM user_camera_permissions p WHERE p.user_id=%1 AND p.camera_id=c.id)").arg(userId))))return fail("camera query failed",500);
         QJsonArray rows;
         while(query.next())rows.append(QJsonObject{{"id",query.value(0).toString()},{"name",query.value(1).toString()},
             {"status",query.value(2).toString()},{"enabled",query.value(3).toBool()}});
         return reply(QJsonObject{{"cameras",rows}});
+    }
+    if(request.path=="/api/camera") {
+        bool valid=false;qint64 id=request.query.queryItemValue("id").toLongLong(&valid);
+        if(!valid || id<=0)return fail("invalid camera",400);
+        query.prepare("SELECT 1 FROM cameras WHERE id=?");query.addBindValue(id);
+        if(!query.exec() || !query.next())return fail("camera not found",404);
+        if(!admin) {
+            query.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");query.addBindValue(userId);query.addBindValue(id);
+            if(!query.exec() || !query.next())return fail("camera forbidden",403);
+        }
+        return reply(QJsonObject{{"id",QString::number(id)}});
     }
     bool ok=true;
     int page=request.query.queryItemValue("page").toInt(&ok);
@@ -76,8 +151,9 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     QString day=request.query.queryItemValue("date");
     QDate date=QDate::fromString(day,Qt::ISODate);
     if(!day.isEmpty() && (!date.isValid() || date.toString(Qt::ISODate)!=day))return fail("invalid date",400);
-    QString where;
-    if(!day.isEmpty())where=" WHERE e.occurred_at>=:begin AND e.occurred_at<:end";
+    QString where=" WHERE 1=1";
+    if(!admin)where+=QString(" AND EXISTS(SELECT 1 FROM user_camera_permissions p WHERE p.user_id=%1 AND p.camera_id=e.camera_id)").arg(userId);
+    if(!day.isEmpty())where+=" AND e.occurred_at>=:begin AND e.occurred_at<:end";
     auto bind=[date,day](QSqlQuery &q){if(!day.isEmpty()){
         q.bindValue(":begin",date.toString(Qt::ISODate)+" 00:00:00");
         q.bindValue(":end",date.addDays(1).toString(Qt::ISODate)+" 00:00:00");}};

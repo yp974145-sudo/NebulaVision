@@ -94,3 +94,5 @@ SOURCES += player/ffmpegplayer.cpp
 HEADERS += player/ffmpegplayer.h
 SOURCES += service/apiclient.cpp
 HEADERS += service/apiclient.h
+
+QT += concurrent

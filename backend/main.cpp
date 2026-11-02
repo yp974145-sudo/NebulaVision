@@ -10,6 +10,7 @@ int main(int argc,char **argv) {
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly)) {qCritical("Missing server local config");return 2;}
     QJsonDocument doc=QJsonDocument::fromJson(file.readAll());
+    file.close(); // 配置读完即关闭，不长期锁住本地配置文件。
     if(!doc.isObject())return 2;
     ApiServer server(doc.object());
     if(!server.listen())return 3;
