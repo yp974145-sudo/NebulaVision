@@ -163,7 +163,7 @@ void MonitorWidget::refreshDevices()
         QJsonArray devices=result.data.value("cameras").toArray();
         for(int i=0;i<devices.size();i++) {
             QJsonObject camera=devices[i].toObject();
-            QListWidgetItem *item=new QListWidgetItem(camera.value("name").toString(),deviceList);
+            QListWidgetItem *item=new QListWidgetItem(camera.value("name").toString()+" ["+camera.value("status").toString()+"]",deviceList);
             item->setData(Qt::UserRole,camera.value("id").toString());
         }
         deviceStatus->setText(QString("可访问设备 %1 个").arg(devices.size()));

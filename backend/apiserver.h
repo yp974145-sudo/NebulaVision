@@ -26,6 +26,7 @@ private:
     QMutex sessionMutex;
     QHash<QString,QPair<qint64,QDateTime>> sessions;
     QHash<QString,QPair<int,qint64>> loginAttempts;
+    QHash<qint64,QPair<int,qint64>> fallbackLimits;
     QJsonObject config;
     QHttpServer http;
     QTcpServer tcp;

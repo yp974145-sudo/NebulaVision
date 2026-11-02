@@ -2,6 +2,7 @@
 #include "mediaadapter.h"
 #include "serverdb.h"
 #include "recorder.h"
+#include "redisclient.h"
 #include <QDir>
 #include <QFile>
 #include <QtConcurrent>
@@ -27,7 +28,7 @@ static QHttpServerResponse fail(const QString &message,int code) {
 // 每个工作请求拥有自己的连接；query必须在这个对象之前销毁。
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
-    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file"};
+    QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat"};
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -135,6 +136,28 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     auth.prepare("SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=? AND r.code='admin'");auth.addBindValue(userId);
     bool admin=auth.exec() && auth.next();
 
+    int redisPort=config.value("redis_port").toInt(16379);
+    int limit=config.value("rate_per_minute").toInt(120);
+    bool redisOk=false;
+    QString rateKey=QString("nv:rate:%1:%2").arg(userId).arg(QDateTime::currentSecsSinceEpoch()/60);
+    QVariant rate=RedisClient::command(redisPort,QStringList()<<"EVAL"<<"local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]); end; return n"<<"1"<<rateKey<<"60",&redisOk);
+    if(redisOk){if(rate.toLongLong()>limit)return fail("rate limit exceeded",429);}
+    else {
+        // Redis故障时仍有进程内保护，但不宣称跨进程共享限流。
+        QMutexLocker lock(&sessionMutex);auto &counter=fallbackLimits[userId];qint64 minute=QDateTime::currentSecsSinceEpoch()/60;
+        if(counter.second!=minute){counter={0,minute};}if(++counter.first>limit)return fail("local rate limit exceeded",429);
+    }
+    if(request.path=="/api/status")return reply(QJsonObject{{"redis",redisOk?"available":"unavailable"},{"rateMode",redisOk?"redis":"local-fallback"}});
+    if(request.path=="/api/cameras/heartbeat") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        if(!admin)return fail("heartbeat admin required",403);
+        bool valid=false;qint64 camera=request.body.value("cameraId").toString().toLongLong(&valid);
+        int ttl=request.body.value("ttl").toInt(6);if(!valid || camera<=0 || ttl<2 || ttl>60)return fail("invalid heartbeat",400);
+        auth.prepare("SELECT 1 FROM cameras WHERE id=?");auth.addBindValue(camera);if(!auth.exec()||!auth.next())return fail("camera missing",404);
+        bool ok=false;RedisClient::command(redisPort,QStringList()<<"SET"<<QString("nv:camera:%1").arg(camera)<<"online"<<"EX"<<QString::number(ttl),&ok);
+        if(!ok)return fail("heartbeat storage unavailable",503);
+        return reply(QJsonObject{{"status","online"},{"ttl",ttl}});
+    }
     if(request.path=="/api/me")return reply(QJsonObject{{"id",QString::number(userId)},{"admin",admin}});
 
     if(request.path=="/api/media/play" || request.path=="/api/media/publish") {
@@ -219,8 +242,13 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     if(request.path=="/api/cameras") {
         if(!query.exec(QString("SELECT id,name,status,enabled FROM cameras c %1 ORDER BY id").arg(admin?QString():QString("WHERE EXISTS(SELECT 1 FROM user_camera_permissions p WHERE p.user_id=%1 AND p.camera_id=c.id)").arg(userId))))return fail("camera query failed",500);
         QJsonArray rows;
-        while(query.next())rows.append(QJsonObject{{"id",query.value(0).toString()},{"name",query.value(1).toString()},
-            {"status",query.value(2).toString()},{"enabled",query.value(3).toBool()}});
+        while(query.next()) {
+            bool ok=false;QString id=query.value(0).toString();
+            QVariant alive=RedisClient::command(redisPort,QStringList()<<"GET"<<"nv:camera:"+id,&ok);
+            QString status=ok?(alive.isValid()?"online":"offline"):"unknown";
+            rows.append(QJsonObject{{"id",id},{"name",query.value(1).toString()},{"status",status},
+                {"enabled",query.value(3).toBool()},{"statusSource",ok?"redis":"unavailable"}});
+        }
         return reply(QJsonObject{{"cameras",rows}});
     }
     if(request.path=="/api/camera") {

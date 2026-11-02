@@ -10,4 +10,3 @@ INCLUDEPATH += $$PROJECT_ROOT
 TARGET = recording_ui_check
 DESTDIR = $$OUT_PWD/../bin-qt6
 CONFIG += console
-

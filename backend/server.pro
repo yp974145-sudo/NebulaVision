@@ -10,3 +10,5 @@ SOURCES += mediaadapter.cpp
 HEADERS += mediaadapter.h
 SOURCES += recorder.cpp
 HEADERS += recorder.h serverdb.h
+SOURCES += redisclient.cpp
+HEADERS += redisclient.h
