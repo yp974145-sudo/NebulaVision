@@ -1,0 +1,9 @@
+QT += core network
+QT -= gui
+CONFIG += console c++17
+TEMPLATE = app
+TARGET = api_client_check
+DESTDIR = $$OUT_PWD/../bin-qt6
+INCLUDEPATH += ..
+SOURCES += api_client_check.cpp ../service/apiclient.cpp
+HEADERS += ../service/apiclient.h

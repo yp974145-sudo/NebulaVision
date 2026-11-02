@@ -16,3 +16,6 @@ greaterThan(QT_MAJOR_VERSION, 5) {
     CONFIG += c++17
     DESTDIR = ../bin-qt6
 }
+
+SOURCES += ../service/apiclient.cpp
+HEADERS += ../service/apiclient.h

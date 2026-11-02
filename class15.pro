@@ -92,3 +92,5 @@ SOURCES += player/qtvideoplayer.cpp
 HEADERS += player/videoplayer.h player/qtvideoplayer.h
 SOURCES += player/ffmpegplayer.cpp
 HEADERS += player/ffmpegplayer.h
+SOURCES += service/apiclient.cpp
+HEADERS += service/apiclient.h
