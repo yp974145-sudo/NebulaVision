@@ -31,6 +31,14 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     deviceStatus=new QLabel("登录后刷新设备",left);deviceStatus->setWordWrap(true);
     QPushButton *refresh=new QPushButton("刷新设备",left);
     leftLayout->addWidget(deviceList);leftLayout->addWidget(deviceStatus);leftLayout->addWidget(refresh);
+    QPushButton *capture=new QPushButton("录制所选设备6秒",left);leftLayout->addWidget(capture);
+    connect(capture,&QPushButton::clicked,this,[this](){
+        if(!deviceList->currentItem()){deviceStatus->setText("先选择服务端摄像头");return;}
+        QString camera=deviceList->currentItem()->data(Qt::UserRole).toString();
+        struct Result {QJsonObject data;QString error;};QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
+        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){Result result=watcher->result();watcher->deleteLater();deviceStatus->setText(result.error.isEmpty()?"后台录制中，稍后到回看页刷新录像列表。":result.error);});
+        watcher->setFuture(QtConcurrent::run([camera](){Result result;result.data=ApiClient::request("/api/recordings/capture",QJsonObject{{"cameraId",camera},{"seconds",6}},true,&result.error);return result;}));
+    });
     connect(refresh,&QPushButton::clicked,this,&MonitorWidget::refreshDevices);
     connect(deviceList,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem *item) {
         QString camera=item->data(Qt::UserRole).toString();int channel=selectedChannel;
@@ -121,6 +129,7 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
 void MonitorWidget::openSource(int channel,const QString &source)
 {
     if(channel<0 || channel>=4) return;
+    channelList->setCurrentRow(channel); // 回放指定通道时同步选择，避免视频在隐藏槽播放。
     players[channel]->open(source);
 }
 void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop(); }

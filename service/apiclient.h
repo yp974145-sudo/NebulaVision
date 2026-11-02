@@ -11,6 +11,7 @@ public:
 class ApiClient {
 public:
     // 该函数供工作线程调用；网络事件异步推进，最长8秒，不能在GUI中直接等待。
+    static bool download(const QString &path,const QString &target,QString *error);
     static QJsonObject request(const QString &path,const QJsonObject &body, bool post, QString *error);
 };
 #endif

@@ -7,33 +7,30 @@
 #include <QLabel>
 #include <QSpinBox>
 #include "datapicker.h"
-#include "../service/recordservice.h"
-#include "../service/eventservice.h"
-#include "../service/eventquerytask.h"
+#include "../service/reviewquerytask.h"
 class ReviewWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit ReviewWidget(QWidget *parent=nullptr, const QString &configPath=QString());
-    void refresh();
+    explicit ReviewWidget(QWidget *parent=nullptr,const QString &configPath=QString());
     ~ReviewWidget() override;
+    void refresh();
+signals:
+    void recordingReady(const QString &localPath);
 private:
+    void resetQuery(bool date);
     void loadPage();
-    void loadEvents();
-    void startEventQuery();
-    void showEvents(int requestId, const EventResult &result);
-    void resetQuery(bool byDate);
+    void startQuery();
+    void showPage(int id,const RecordPage &result);
+    void openRecording(int row);
     DataPicker *datePicker;
-    QComboBox *typeBox, *pageSize;
+    QComboBox *typeBox,*pageSize;
     QTableWidget *table;
-    QPushButton *previous, *next;
+    QPushButton *previous,*next;
     QSpinBox *jump;
-    QLabel *count, *detail;
-    RecordService service;
-    EventQueryTask *eventTask = nullptr;
-    int eventRequestId = 0;
-    QString eventConfigPath; // 留空时读取默认本地配置；测试时可指定配置副本。
+    QLabel *count,*detail;
     bool byDate=false;
     QDate selectedDate;
-    int page=1, pages=1;
+    int page=1,pages=1,generation=0;
+    ReviewQueryTask *task=nullptr;
 };
 #endif

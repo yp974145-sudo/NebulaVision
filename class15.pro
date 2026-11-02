@@ -96,3 +96,5 @@ SOURCES += service/apiclient.cpp
 HEADERS += service/apiclient.h
 
 QT += concurrent
+SOURCES += service/reviewquerytask.cpp
+HEADERS += service/reviewquerytask.h

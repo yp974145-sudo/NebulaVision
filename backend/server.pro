@@ -8,3 +8,5 @@ SOURCES += main.cpp apiserver.cpp
 HEADERS += apiserver.h
 SOURCES += mediaadapter.cpp
 HEADERS += mediaadapter.h
+SOURCES += recorder.cpp
+HEADERS += recorder.h serverdb.h

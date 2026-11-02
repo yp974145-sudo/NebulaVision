@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QThreadPool>
 #include "apiserver.h"
+#include "serverdb.h"
 int main(int argc,char **argv) {
     QCoreApplication app(argc,argv);
     QString path=QString::fromUtf8(qgetenv("NEBULAVISION_SERVER_CONFIG"));
@@ -14,6 +15,11 @@ int main(int argc,char **argv) {
     if(!doc.isObject())return 2;
     ApiServer server(doc.object());
     if(!server.listen())return 3;
+    {
+        // 已独占监听端口后才恢复旧任务，防止第二个实例干扰正在录制的实例。
+        ServerDb db(doc.object());QSqlQuery recovery(db.db);
+        recovery.exec("UPDATE recordings SET status='interrupted' WHERE status='writing'");
+    }
     int result=app.exec();
     QThreadPool::globalInstance()->waitForDone();
     return result;

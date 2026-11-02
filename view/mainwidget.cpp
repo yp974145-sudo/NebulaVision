@@ -22,6 +22,9 @@ MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 
     ReviewWidget *r_widget=new ReviewWidget;
     buttom_layout->addWidget(r_widget);
+    connect(r_widget,&ReviewWidget::recordingReady,this,[this,m_widget](const QString &path){
+        buttom_layout->setCurrentIndex(0);m_widget->switch_to_channel1();m_widget->openSource(0,path);
+    });
     //将两个布局加到主布局
     main_layout->addLayout(top_layout,1);
     main_layout->addLayout(buttom_layout,8);
