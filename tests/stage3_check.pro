@@ -11,3 +11,9 @@ HEADERS += ../view/reviewwidget.h ../view/datapicker.h ../model/eventrepository.
 
 SOURCES += ../service/eventquerytask.cpp
 HEADERS += ../service/eventquerytask.h
+
+greaterThan(QT_MAJOR_VERSION, 5) {
+    CONFIG -= c++11
+    CONFIG += c++17
+    DESTDIR = ../bin-qt6
+}

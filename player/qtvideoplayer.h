@@ -3,6 +3,9 @@
 #include "videoplayer.h"
 #include <QMediaPlayer>
 #include <QVideoWidget>
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+#include <QAudioOutput>
+#endif
 class QtVideoPlayer : public VideoPlayer
 {
     Q_OBJECT
@@ -15,6 +18,9 @@ public:
     void stop() override;
 private:
     QMediaPlayer *media;
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    QAudioOutput *audio;
+#endif
     QVideoWidget *surface;
 };
 #endif
