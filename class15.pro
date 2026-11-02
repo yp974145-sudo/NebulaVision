@@ -77,3 +77,6 @@ SOURCES += model/eventrepository.cpp
 HEADERS += model/eventrepository.h service/eventservice.h
 SOURCES += service/eventquerytask.cpp
 HEADERS += service/eventquerytask.h
+QT += multimedia multimediawidgets
+SOURCES += player/qtvideoplayer.cpp
+HEADERS += player/videoplayer.h player/qtvideoplayer.h

@@ -1,4 +1,6 @@
 #include "monitorwidget.h"
+#include "../player/qtvideoplayer.h"
+#include <QFileDialog>
 
 
 MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
@@ -74,11 +76,32 @@ void MonitorWidget::init_rightwidget()
     //初始化单通道窗口
     QVBoxLayout *w1_layout=new QVBoxLayout;
     w1->setLayout(w1_layout);
-    lab_vidoe=new QLabel;
-    lab_vidoe->setPixmap(QPixmap(":/img/摄像头_关闭.png"));
-    lab_vidoe->setScaledContents(true);//内容随窗口缩放
-    lab_vidoe->setAlignment(Qt::AlignCenter);//设置内容居中
-    w1_layout->addWidget(lab_vidoe,0,Qt::AlignCenter);
+    player = new QtVideoPlayer(w1);
+    w1_layout->addWidget(player->videoWidget());
+    playStatus = new QLabel("选择本地视频开始播放");
+    right_layout->addWidget(playStatus);
+    QHBoxLayout *playButtons = new QHBoxLayout;
+    QPushButton *open = new QPushButton("打开视频");
+    QPushButton *pause = new QPushButton("暂停");
+    QPushButton *resume = new QPushButton("继续");
+    QPushButton *stop = new QPushButton("停止");
+    playButtons->addWidget(open);
+    playButtons->addWidget(pause);
+    playButtons->addWidget(resume);
+    playButtons->addWidget(stop);
+    right_layout->addLayout(playButtons);
+    connect(open, &QPushButton::clicked, this, [this]() {
+        QString path = QFileDialog::getOpenFileName(this, "选择本地视频", QString(), "视频 (*.mp4 *.avi *.mkv *.wmv);;所有文件 (*)");
+        if (!path.isEmpty()) {
+            switch_to_channel1();
+            player->open(path);
+        }
+    });
+    connect(pause, &QPushButton::clicked, player, &VideoPlayer::pause);
+    connect(resume, &QPushButton::clicked, player, &VideoPlayer::resume);
+    connect(stop, &QPushButton::clicked, player, &VideoPlayer::stop);
+    connect(player, &VideoPlayer::statusChanged, playStatus, &QLabel::setText);
+    connect(player, &VideoPlayer::playbackError, playStatus, &QLabel::setText);
     //初始化四窗口
     int x=0,y=0;
     QGridLayout *w4_layout=new QGridLayout;

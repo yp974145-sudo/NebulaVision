@@ -12,11 +12,14 @@
 #include <QIcon>
 #include <QFile>
 #include <QPushButton>
+#include "../player/videoplayer.h"
 
 class MonitorWidget : public QWidget
 {
     Q_OBJECT
 private:
+    VideoPlayer *player;
+    QLabel *playStatus;
     QStackedLayout *video_layout;
     QWidget *left_widget;
     QWidget *right_widget;
