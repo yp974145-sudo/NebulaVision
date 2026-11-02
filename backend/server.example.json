@@ -1,0 +1,18 @@
+{
+  "database": "nebulavision_dev",
+  "username": "nebulavision_service",
+  "password": "SET_IN_IGNORED_LOCAL_CONFIG",
+  "port": 18880,
+  "token_ttl_seconds": 3600,
+  "media_secret": "GENERATE_A_RANDOM_SECRET_AT_LEAST_32_CHARACTERS",
+  "recording_root": "C:/path/to/x/recordings",
+  "ffmpeg": "C:/path/to/ffmpeg.exe",
+  "redis_port": 16379,
+  "rate_per_minute": 120,
+  "python": "C:/path/to/python.exe",
+  "python_packages": "C:/path/to/x/runtime-python",
+  "rpc_client": "C:/path/to/project/detector/rpc_client.py",
+  "rpc_secret": "GENERATE_A_SEPARATE_RANDOM_SECRET",
+  "detection_mode": "onnx",
+  "model_version": "yolov5n-v7-04f0e55c26f58d17"
+}

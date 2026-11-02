@@ -35,6 +35,7 @@ void Recorder::start(const QJsonObject &config,const QString &id,const QString &
                 }
             }
         }
+        if(!ready && QFileInfo(partial).isFile())QFile::remove(partial); // 只清理本任务尚未发布的临时片。
         ServerDb connection(config);QSqlQuery query(connection.db);
         query.prepare("UPDATE recordings SET status=?,ended_at=UTC_TIMESTAMP(3),bytes=? WHERE id=? AND status='writing'");
         query.addBindValue(ready?"ready":"failed");query.addBindValue(ready?QFileInfo(finalPath).size():0);query.addBindValue(id);query.exec();

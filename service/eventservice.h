@@ -23,7 +23,7 @@ public:
         QJsonArray rows=response.value("events").toArray();
         for(int i=0;i<rows.size();i++) {
             QJsonObject row=rows.at(i).toObject();EventData event;
-            event.id=row.value("id").toString();event.cameraName=row.value("cameraName").toString();
+            event.id=row.value("id").toString();event.recordingId=row.value("recordingId").toString();if(event.recordingId.toLongLong()<=0)event.recordingId.clear();event.cameraName=row.value("cameraName").toString();
             event.occurredAt=row.value("occurredAt").toString();event.type=row.value("type").toString();
             event.description=row.value("description").toString();event.status=row.value("status").toString();
             result.events.append(event);

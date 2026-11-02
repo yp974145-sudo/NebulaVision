@@ -53,10 +53,10 @@ bool ApiClient::download(const QString &path,const QString &target,QString *erro
     if(!url.isValid() || (url.scheme()!="https" && !(url.scheme()=="http" && url.host()=="127.0.0.1"))){if(error)*error="下载地址无效";return false;}
     QSaveFile file(target);if(!file.open(QIODevice::WriteOnly)){if(error)*error="本地缓存不可写";return false;}
     QNetworkAccessManager manager;QNetworkRequest request(url);request.setRawHeader("Authorization",("Bearer "+ApiSession::token()).toUtf8());
-    QNetworkReply *reply=manager.get(request);QEventLoop loop;QTimer timeout;timeout.setSingleShot(true);qint64 bytes=0;bool failed=false;
-    QObject::connect(reply,&QNetworkReply::readyRead,[&](){QByteArray chunk=reply->readAll();bytes+=chunk.size();if(bytes>64*1024*1024 || file.write(chunk)!=chunk.size()){failed=true;reply->abort();}});
+    QNetworkReply *reply=manager.get(request);QEventLoop loop;QTimer timeout;timeout.setSingleShot(true);qint64 bytes=0;bool failed=false;QByteArray preview;
+    QObject::connect(reply,&QNetworkReply::readyRead,[&](){QByteArray chunk=reply->readAll();if(preview.size()<4096)preview.append(chunk.left(4096-preview.size()));bytes+=chunk.size();if(bytes>64*1024*1024 || file.write(chunk)!=chunk.size()){failed=true;reply->abort();}});
     QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);QObject::connect(&timeout,&QTimer::timeout,reply,&QNetworkReply::abort);timeout.start(15000);loop.exec();
     int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if(failed || reply->error()!=QNetworkReply::NoError || status!=200 || bytes==0){file.cancelWriting();if(error)*error=QString("录像下载失败（HTTP %1），检查登录权限或文件状态").arg(status);return false;}
+    if(failed || reply->error()!=QNetworkReply::NoError || status!=200 || bytes==0){file.cancelWriting();if(error)*error=QString("录像下载失败（HTTP %1），检查登录权限或文件状态").arg(status)+" "+QJsonDocument::fromJson(preview).object().value("error").toString();return false;}
     if(!file.commit()){if(error)*error="保存录像缓存失败";return false;}return true;
 }

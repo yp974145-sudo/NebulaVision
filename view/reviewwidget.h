@@ -22,6 +22,9 @@ private:
     void startQuery();
     void showPage(int id,const RecordPage &result);
     void openRecording(int row);
+    void detectSelected();
+    void pollDetection(const QString &id,int tries);
+    QString latestDetection;
     DataPicker *datePicker;
     QComboBox *typeBox,*pageSize;
     QTableWidget *table;

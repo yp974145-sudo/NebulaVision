@@ -1,5 +1,6 @@
 """C++的本机gRPC适配器。输入走stdin，不将密钥放到进程参数或日志。"""
 import sys,json
+sys.dont_write_bytecode=True
 import grpc
 import detection_pb2 as pb
 import detection_pb2_grpc as rpc

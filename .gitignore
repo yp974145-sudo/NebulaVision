@@ -26,3 +26,6 @@ CMakeLists.txt.user*
 # 日志
 *.log
 /bin-qt6/
+
+__pycache__/
+*.py[cod]

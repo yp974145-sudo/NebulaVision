@@ -23,6 +23,7 @@ class MainWidget : public QWidget
 private:
     QHBoxLayout *top_layout;
     QPushButton *btn_login = nullptr;
+    QPushButton *btn_logout = nullptr;
     QLabel *lab_login;
     QLabel *lay_time;
     QPushButton *btn_jiankong;

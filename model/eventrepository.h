@@ -9,6 +9,7 @@ struct EventData
 {
     QString id;
     QString cameraName;
+    QString recordingId;
     QString occurredAt;
     QString type;
     QString description;

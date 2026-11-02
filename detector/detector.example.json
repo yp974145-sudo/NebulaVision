@@ -1,0 +1,8 @@
+{
+  "secret": "SAME_RPC_SECRET_AS_SERVER_LOCAL_CONFIG",
+  "state": "C:/path/to/x/detector-state/jobs.sqlite3",
+  "allowed_roots": ["C:/path/to/x/recordings", "C:/path/to/x/models"],
+  "allow_test": false,
+  "model": "C:/path/to/x/models/yolov5n.onnx",
+  "ffmpeg": "C:/path/to/ffmpeg.exe"
+}

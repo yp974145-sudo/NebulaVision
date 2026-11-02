@@ -1,5 +1,6 @@
 """独立gRPC检测进程。仅监听本机，校验元数据密钥、输入根目录及截止时间。"""
-import sys,json,sqlite3,hashlib,threading,time,secrets,re
+import sys,json,sqlite3,hashlib,threading,time,secrets,re,subprocess
+sys.dont_write_bytecode=True
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import grpc
@@ -8,6 +9,8 @@ import detection_pb2_grpc as rpc
 
 config=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8-sig'))
 lock=threading.Lock();slots=threading.BoundedSemaphore(2)
+from inference import Engine
+engine=Engine(config)
 state=Path(config['state']);state.parent.mkdir(parents=True,exist_ok=True)
 with sqlite3.connect(state) as db:
  db.execute('CREATE TABLE IF NOT EXISTS jobs(job_id TEXT PRIMARY KEY,fingerprint TEXT,state TEXT,response BLOB)')
@@ -25,7 +28,7 @@ class Detector(rpc.DetectorServicer):
   if request.mode not in ('test','onnx'):context.abort(grpc.StatusCode.INVALID_ARGUMENT,'invalid detector mode')
   if not 0.05<=request.threshold<=0.95:context.abort(grpc.StatusCode.INVALID_ARGUMENT,'invalid threshold')
   if request.roi and (len(request.roi)!=4 or not 0<=request.roi[0]<request.roi[2]<=1 or not 0<=request.roi[1]<request.roi[3]<=1):context.abort(grpc.StatusCode.INVALID_ARGUMENT,'invalid ROI')
-  fingerprint=hashlib.sha256(request.SerializeToString()).hexdigest()
+  fingerprint=hashlib.sha256(request.SerializeToString()+(engine.model_version if request.mode=='onnx' else 'synthetic-contract-v1').encode()).hexdigest()
   with lock,sqlite3.connect(state) as db:
    old=db.execute('SELECT fingerprint,state,response FROM jobs WHERE job_id=?',(request.job_id,)).fetchone()
    if old:
@@ -45,7 +48,12 @@ class Detector(rpc.DetectorServicer):
     reply=pb.DetectReply(job_id=request.job_id,synthetic=True,model_version='synthetic-contract-v1')
     reply.detections.add(class_id=0,label='person',confidence=.9,x=.1,y=.1,width=.2,height=.3)
    else:
-    context.abort(grpc.StatusCode.UNIMPLEMENTED,'real inference not enabled in stage 15')
+    try:
+     detections=engine.detect(path,request.threshold,request.roi,context.time_remaining() or 5)
+    except Exception:
+     context.abort(grpc.StatusCode.UNAVAILABLE,'inference or frame extraction failed')
+    reply=pb.DetectReply(job_id=request.job_id,synthetic=False,model_version=engine.model_version)
+    for detection in detections:reply.detections.add(**detection)
    if not context.is_active():context.abort(grpc.StatusCode.CANCELLED,'cancelled')
    with lock,sqlite3.connect(state) as db:db.execute("UPDATE jobs SET state='done',response=? WHERE job_id=?",(reply.SerializeToString(),request.job_id))
    stored=True;return reply

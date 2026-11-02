@@ -2,6 +2,9 @@
 #include "../util/winmanager.h"
 #include <QGuiApplication>
 #include <QScreen>
+#include "../service/apiclient.h"
+#include <QtConcurrent>
+#include <QFutureWatcher>
 
 MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 {
@@ -50,6 +53,7 @@ void MainWidget::inif_top_widget()
     this->top_layout->addWidget(btn_review);
     QPushButton *btn_setting=new QPushButton(QIcon(":/img/设置.png"),"设置");
     this->top_layout->addWidget(btn_setting);
+    btn_logout=new QPushButton("退出登录");btn_logout->setEnabled(false);top_layout->addWidget(btn_logout);
 
     lay_time=new QLabel("");
     top_layout->addWidget(lay_time);
@@ -84,6 +88,15 @@ void MainWidget::init_qss()
 void MainWidget::init_connect()
 {
     connect(btn_login,SIGNAL(clicked()),this,SLOT(to_login_win()));
+    connect(btn_logout,&QPushButton::clicked,this,[this](){
+        btn_logout->setEnabled(false);btn_login->setEnabled(false);
+        QString oldToken=ApiSession::token();QFutureWatcher<QString> *watcher=new QFutureWatcher<QString>(this);
+        connect(watcher,&QFutureWatcher<QString>::finished,this,[this,watcher,oldToken](){
+            watcher->deleteLater();btn_login->setEnabled(true);
+            if(ApiSession::token()==oldToken){ApiSession::setToken(QString());lab_login->setText("未登录");MonitorWidget *monitor=findChild<MonitorWidget *>();if(monitor){monitor->stopAll();monitor->refreshDevices();}}
+        });
+        watcher->setFuture(QtConcurrent::run([](){QString error;ApiClient::request("/api/logout",{},true,&error);return error;}));
+    });
     //顶部导航切换：监控页/回放页，和单/四通道切换同理，堆叠布局切页
     connect(btn_jiankong,SIGNAL(clicked()),this,SLOT(switch_to_monitor()));
     connect(btn_review,&QPushButton::clicked,this,[]{ WinManager::getInstence()->showReview(); });
@@ -127,6 +140,7 @@ void MainWidget::to_login_win()
 void MainWidget::showUsername(const QString &username)
 {
     lab_login->setText(username);
+    btn_logout->setEnabled(true);
     MonitorWidget *monitor=findChild<MonitorWidget *>();
     if(monitor)monitor->refreshDevices();
     this->show();

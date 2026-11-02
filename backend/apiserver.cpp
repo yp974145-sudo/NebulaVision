@@ -246,7 +246,10 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         QString jobKey=request.body.value("jobKey").toString();
         if(!QRegularExpression("^[A-Za-z0-9_-]{8,64}$").match(jobKey).hasMatch())return fail("invalid job key",400);
         bool valid=false;qint64 recording=request.body.value("recordingId").toString().toLongLong(&valid);
+        if(request.body.contains("threshold") && !request.body.value("threshold").isDouble())return fail("threshold must be numeric",400);
+        if(request.body.contains("roi") && !request.body.value("roi").isArray())return fail("region must be array",400);
         double threshold=request.body.value("threshold").toDouble(.25);QJsonArray roi=request.body.value("roi").toArray();
+        for(const QJsonValue &coordinate:roi)if(!coordinate.isDouble() || !qIsFinite(coordinate.toDouble()))return fail("invalid region coordinate",400);
         if(!valid || recording<=0 || !qIsFinite(threshold) || threshold<.05 || threshold>.95)return fail("invalid detection parameters",400);
         if(!roi.isEmpty() && (roi.size()!=4 || !(0<=roi[0].toDouble() && roi[0].toDouble()<roi[2].toDouble() && roi[2].toDouble()<=1 && 0<=roi[1].toDouble() && roi[1].toDouble()<roi[3].toDouble() && roi[3].toDouble()<=1)))return fail("invalid region",400);
         auth.prepare("SELECT camera_id,object_key,status FROM recordings WHERE id=?");auth.addBindValue(recording);
@@ -254,7 +257,7 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         QString camera=auth.value(0).toString();QString filename=auth.value(1).toString();if(auth.value(2).toString()!="ready")return fail("recording not ready",409);
         if(QFileInfo(filename).fileName()!=filename)return fail("invalid storage key",500);
         QString path=QDir(config.value("recording_root").toString()).filePath(filename);if(!QFileInfo(path).isFile())return fail("recording file missing",410);
-        QByteArray input=QJsonDocument(QJsonObject{{"recordingId",QString::number(recording)},{"threshold",threshold},{"roi",roi},{"mode",config.value("detection_mode")}}).toJson(QJsonDocument::Compact);
+        QByteArray input=QJsonDocument(QJsonObject{{"recordingId",QString::number(recording)},{"threshold",threshold},{"roi",roi},{"mode",config.value("detection_mode")},{"modelVersion",config.value("model_version")}}).toJson(QJsonDocument::Compact);
         QString fingerprint=QString::fromLatin1(QCryptographicHash::hash(input,QCryptographicHash::Sha256).toHex());
         auth.prepare("SELECT id,input_hash,owner_id,status FROM detection_jobs WHERE job_key=?");auth.addBindValue(jobKey);
         if(!auth.exec())return fail("job lookup failed",500);
@@ -320,12 +323,12 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     if(!query.exec() || !query.next())return fail("event count failed",500);
     int total=query.value(0).toInt();int pages=qMax(1,(total+size-1)/size);page=qMin(page,pages);
     query.finish();
-    query.prepare("SELECT e.id,c.name,e.occurred_at,e.event_type,e.description,e.status FROM events e LEFT JOIN cameras c ON c.id=e.camera_id"+where+" ORDER BY e.occurred_at DESC,e.id DESC LIMIT :size OFFSET :offset");
+    query.prepare("SELECT e.id,c.name,e.occurred_at,e.event_type,e.description,e.status,e.recording_id FROM events e LEFT JOIN cameras c ON c.id=e.camera_id"+where+" ORDER BY e.occurred_at DESC,e.id DESC LIMIT :size OFFSET :offset");
     bind(query);query.bindValue(":size",size);query.bindValue(":offset",(page-1)*size);
     if(!query.exec())return fail("event query failed",500);
     QJsonArray rows;
     while(query.next())rows.append(QJsonObject{{"id",query.value(0).toString()},{"cameraName",query.value(1).toString()},
         {"occurredAt",query.value(2).toDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz")},{"type",query.value(3).toString()},
-        {"description",query.value(4).toString()},{"status",query.value(5).toString()}});
+        {"description",query.value(4).toString()},{"status",query.value(5).toString()},{"recordingId",query.value(6).isNull()?QString():query.value(6).toString()}});
     return reply(QJsonObject{{"events",rows},{"total",total},{"page",page},{"pages",pages}});
 }

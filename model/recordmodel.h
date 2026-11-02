@@ -6,6 +6,7 @@
 struct RecordPage {
     QStringList headers;
     QVector<QStringList> rows;
+    QVector<QString> recordingIds; // 事件关联证据，供界面隐藏元数据使用。
     int total = 0;
     int page = 1;
     int pages = 1;
