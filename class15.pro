@@ -80,3 +80,5 @@ HEADERS += service/eventquerytask.h
 QT += multimedia multimediawidgets
 SOURCES += player/qtvideoplayer.cpp
 HEADERS += player/videoplayer.h player/qtvideoplayer.h
+SOURCES += player/ffmpegplayer.cpp
+HEADERS += player/ffmpegplayer.h

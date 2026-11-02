@@ -1,5 +1,5 @@
 #include "monitorwidget.h"
-#include "../player/qtvideoplayer.h"
+#include "../player/ffmpegplayer.h"
 #include <QFileDialog>
 
 
@@ -76,7 +76,7 @@ void MonitorWidget::init_rightwidget()
     //初始化单通道窗口
     QVBoxLayout *w1_layout=new QVBoxLayout;
     w1->setLayout(w1_layout);
-    player = new QtVideoPlayer(w1);
+    player = new FfmpegPlayer(w1);
     w1_layout->addWidget(player->videoWidget());
     playStatus = new QLabel("选择本地视频开始播放");
     right_layout->addWidget(playStatus);
