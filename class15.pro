@@ -73,6 +73,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 greaterThan(QT_MAJOR_VERSION, 5) {
     DESTDIR = $$PWD/bin-qt6
+    # Debug使用独立文件名，避免覆盖正在运行的Release程序。
+    CONFIG(debug, debug|release): TARGET = class15_debug
 } else {
     DESTDIR = $$PWD/bin
 }
