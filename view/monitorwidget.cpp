@@ -1,6 +1,7 @@
 #include "monitorwidget.h"
 #include "../player/ffmpegplayer.h"
 #include <QFileDialog>
+#include <QInputDialog>
 
 
 MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
@@ -82,10 +83,12 @@ void MonitorWidget::init_rightwidget()
     right_layout->addWidget(playStatus);
     QHBoxLayout *playButtons = new QHBoxLayout;
     QPushButton *open = new QPushButton("打开视频");
+    QPushButton *openStream = new QPushButton("打开RTSP");
     QPushButton *pause = new QPushButton("暂停");
     QPushButton *resume = new QPushButton("继续");
     QPushButton *stop = new QPushButton("停止");
     playButtons->addWidget(open);
+    playButtons->addWidget(openStream);
     playButtons->addWidget(pause);
     playButtons->addWidget(resume);
     playButtons->addWidget(stop);
@@ -95,6 +98,15 @@ void MonitorWidget::init_rightwidget()
         if (!path.isEmpty()) {
             switch_to_channel1();
             player->open(path);
+        }
+    });
+    connect(openStream, &QPushButton::clicked, this, [this]() {
+        bool accepted = false;
+        QString url = QInputDialog::getText(this,"RTSP预览","输入RTSP地址（仅本次使用）",QLineEdit::Normal,
+                                            "rtsp://127.0.0.1:8554/demo",&accepted);
+        if (accepted && !url.trimmed().isEmpty()) {
+            switch_to_channel1();
+            player->open(url.trimmed());
         }
     });
     connect(pause, &QPushButton::clicked, player, &VideoPlayer::pause);

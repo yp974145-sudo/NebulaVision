@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QElapsedTimer>
+#include <QUrl>
 
 DecodeTask::DecodeTask(const QString &source, const QString &executable, QObject *parent)
     : QThread(parent), stopping(false), paused(false)
@@ -19,7 +20,13 @@ void DecodeTask::run()
     QProcess process; // 在工作线程创建和销毁，不跨线程调用QProcess。
     QStringList arguments;
     arguments << "-hide_banner" << "-loglevel" << "error" << "-nostdin";
-    arguments << "-re" << "-i" << source << "-an" << "-sn";
+    bool network = source.startsWith("rtsp://") || source.startsWith("rtsps://");
+    if (network) {
+        arguments << "-rtsp_transport" << "tcp" << "-timeout" << "3000000";
+    } else {
+        arguments << "-re";
+    }
+    arguments << "-i" << source << "-an" << "-sn";
     arguments << "-vf" << "fps=15,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2";
     arguments << "-pix_fmt" << "rgb24" << "-f" << "rawvideo" << "pipe:1";
     // 参数逐项传入，不拼接shell命令，带空格的文件路径也能正确处理。
@@ -89,34 +96,74 @@ FfmpegPlayer::FfmpegPlayer(QWidget *parent) : VideoPlayer(parent)
     surface->setMinimumSize(320,180);
     surface->setText("FFmpeg视频画面");
     surface->setStyleSheet("background:#111;color:white;");
+    retryTimer.setSingleShot(true);
+    connect(&retryTimer,&QTimer::timeout,this,[this]() {
+        if (enabled && networkSource) startDecoding();
+    });
 }
 FfmpegPlayer::~FfmpegPlayer() { stop(); }
 QWidget *FfmpegPlayer::videoWidget() { return surface; }
 void FfmpegPlayer::open(const QString &source)
 {
     stop();
-    if (!QFileInfo(source).isFile()) {
-        emit playbackError("视频文件不存在。");
-        return;
+    QUrl url(source);
+    networkSource = url.scheme()=="rtsp" || url.scheme()=="rtsps";
+    if (networkSource) {
+        if (!url.isValid() || url.host().isEmpty()) {
+            emit playbackError("RTSP地址格式不正确。");
+            return;
+        }
+        currentSource = source;
+    } else {
+        if (!QFileInfo(source).isFile()) {
+            emit playbackError("视频文件不存在，或不支持该协议。");
+            return;
+        }
+        currentSource = QFileInfo(source).absoluteFilePath();
     }
-    QString executable = ffmpegExecutable();
-    if (!QFileInfo(executable).isFile()) {
+    if (!QFileInfo(ffmpegExecutable()).isFile()) {
         emit playbackError("找不到FFmpeg工具，请配置NEBULAVISION_FFMPEG。");
         return;
     }
-    task = new DecodeTask(QFileInfo(source).absoluteFilePath(), executable, this);
-    connect(task,&DecodeTask::frameReady,this,[this](const QImage &frame) {
+    enabled = true;
+    retryCount = 0;
+    startDecoding();
+}
+void FfmpegPlayer::startDecoding()
+{
+    clearTask();
+    ++generation;
+    int session = generation;
+    task = new DecodeTask(currentSource,ffmpegExecutable(),this);
+    connect(task,&DecodeTask::frameReady,this,[this,session](const QImage &frame) {
+        if (session != generation || !enabled) return;
+        retryCount = 0;
         surface->setPixmap(QPixmap::fromImage(frame).scaled(surface->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+        emit statusChanged("正在播放（FFmpeg静音预览）");
         emit frameDisplayed();
     },Qt::QueuedConnection);
-    connect(task,&DecodeTask::failed,this,&VideoPlayer::playbackError,Qt::QueuedConnection);
-    connect(task,&QThread::finished,this,[this](){emit statusChanged("播放结束或已停止");});
+    connect(task,&DecodeTask::failed,this,[this,session](const QString &message) {
+        if (session == generation && enabled) emit playbackError(message);
+    },Qt::QueuedConnection);
+    connect(task,&QThread::finished,this,[this,session]() {
+        if (session != generation || !enabled) return;
+        if (networkSource) {
+            // 1、2、4、8秒退避，之后保持8秒；停止时取消定时器。
+            int delay = 1000 * (1 << qMin(retryCount,3));
+            ++retryCount;
+            retryTimer.start(delay);
+            emit statusChanged(QString("断流，%1秒后重连").arg(delay/1000));
+            emit retryScheduled(delay);
+        } else {
+            emit statusChanged("本地视频播放结束");
+        }
+    });
     task->start();
-    emit statusChanged("FFmpeg正在打开视频（预览无音频）");
+    emit statusChanged("FFmpeg正在连接（静音预览）");
 }
 void FfmpegPlayer::pause() { if(task) {task->setPaused(true);emit statusChanged("已暂停");} }
 void FfmpegPlayer::resume() { if(task && task->isRunning()) {task->setPaused(false);emit statusChanged("正在播放");} }
-void FfmpegPlayer::stop()
+void FfmpegPlayer::clearTask()
 {
     if (task) {
         disconnect(task,nullptr,this,nullptr);
@@ -125,5 +172,14 @@ void FfmpegPlayer::stop()
         delete task;
         task = nullptr;
     }
+}
+void FfmpegPlayer::stop()
+{
+    enabled = false;
+    ++generation; // 已排队的旧帧即使送达，也不能更新新会话。
+    retryTimer.stop();
+    clearTask();
+    surface->clear();
+    surface->setText("已停止");
     emit statusChanged("已停止");
 }

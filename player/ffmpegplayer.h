@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QLabel>
 #include <atomic>
+#include <QTimer>
 
 // FFmpeg在独立子进程解码，工作线程负责读取固定大小的RGB帧。
 class DecodeTask : public QThread
@@ -39,8 +40,17 @@ public:
     void stop() override;
     static QString ffmpegExecutable();
 signals:
+    void retryScheduled(int milliseconds);
     void frameDisplayed(); // 用于观测实际收到并显示的帧。
 private:
+    void startDecoding();
+    void clearTask();
+    QTimer retryTimer;
+    QString currentSource;
+    bool networkSource = false;
+    bool enabled = false;
+    int retryCount = 0;
+    int generation = 0;
     QLabel *surface;
     DecodeTask *task = nullptr;
 };
