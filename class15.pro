@@ -71,3 +71,5 @@ DESTDIR = $$PWD/bin
 
 RESOURCES += \
     resources.qrc
+SOURCES += util/devdbconnection.cpp
+HEADERS += util/devdbconnection.h

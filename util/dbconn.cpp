@@ -41,7 +41,7 @@ DbConn::DbConn()
      db.setHostName("localhost");
      db.setPort(3306);
      db.setUserName("root");
-     const QString databasePassword = qEnvironmentVariable("NEBULAVISION_LEGACY_DB_PASSWORD");
+     const QString databasePassword = QString::fromUtf8(qgetenv("NEBULAVISION_LEGACY_DB_PASSWORD"));
      if (databasePassword.isEmpty()) {
          qWarning() << "Missing environment variable: NEBULAVISION_LEGACY_DB_PASSWORD";
          return;
