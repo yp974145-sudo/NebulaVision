@@ -6,8 +6,9 @@
 #include <QFileInfo>
 #include <QUrl>
 #include <QMessageBox>
-ReviewWidget::ReviewWidget(QWidget *parent) : QWidget(parent)
+ReviewWidget::ReviewWidget(QWidget *parent, const QString &configPath) : QWidget(parent)
 {
+    eventConfigPath = configPath;
     auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(16,16,16,16);
     layout->setSpacing(14);
@@ -18,7 +19,8 @@ ReviewWidget::ReviewWidget(QWidget *parent) : QWidget(parent)
     datePicker = new DataPicker;
     datePicker->setFixedWidth(230);
     typeBox = new QComboBox;
-    typeBox->addItems({"录像记录","异常事件"});
+    typeBox->addItems({"录像记录（旧库）","异常事件（新库）"});
+    typeBox->setCurrentIndex(1); // 默认展示新库事件，进入页面不会查询旧库。
     auto query = new QPushButton("查询日期");
     auto all = new QPushButton("全部记录");
     filters->addWidget(typeBox);
@@ -62,6 +64,17 @@ ReviewWidget::ReviewWidget(QWidget *parent) : QWidget(parent)
     layout->addWidget(detail);
     previous->setEnabled(false);
     next->setEnabled(false);
+    // 阶段2只做新事件列表，禁用未接通的日期和分页，避免误以为筛选已生效。
+    connect(typeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this, query](int index) {
+        bool legacyRecords = (index == 0);
+        datePicker->setEnabled(legacyRecords);
+        query->setEnabled(legacyRecords);
+        pageSize->setEnabled(legacyRecords);
+    });
+    datePicker->setEnabled(false);
+    query->setEnabled(false);
+    pageSize->setEnabled(false);
     connect(query,&QPushButton::clicked,this,[this]{ resetQuery(true); });
     connect(all,&QPushButton::clicked,this,[this]{ resetQuery(false); });
     connect(datePicker,&DataPicker::dateSelected,this,[this](const QDate &){ resetQuery(true); });
@@ -72,6 +85,11 @@ ReviewWidget::ReviewWidget(QWidget *parent) : QWidget(parent)
     connect(next,&QPushButton::clicked,this,[this]{ if(page<pages) { ++page; loadPage(); } });
     connect(jump,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int value){ page=value; loadPage(); });
     connect(table,&QTableWidget::cellDoubleClicked,this,[this](int row,int){
+        // 新事件的最后一列是状态，不是视频路径，不能交给播放器打开。
+        if (typeBox->currentIndex() == 1) {
+            detail->setText("新库事件暂未接入录像播放；合成测试事件不代表真实检测。");
+            return;
+        }
         auto item=table->item(row,table->columnCount()-1);
         if(!item) return;
         QString path=item->text();
@@ -89,6 +107,10 @@ void ReviewWidget::resetQuery(bool enabled)
 }
 void ReviewWidget::loadPage()
 {
+    if (typeBox->currentIndex() == 1) {
+        loadEvents();
+        return;
+    }
     // View 只把查询条件交给 Service，再把返回的这一页显示出来。
     auto result=service.query(typeBox->currentIndex()==1,byDate,selectedDate,page,pageSize->currentText().toInt());
     // 先清掉旧数据，查询失败时就不会还显示上一次的结果。
@@ -121,4 +143,47 @@ void ReviewWidget::loadPage()
     previous->setEnabled(page>1); next->setEnabled(page<pages);
     count->setText(QString("共 %1 条 · 第 %2 / %3 页").arg(result.total).arg(page).arg(pages));
     if(result.total==0) detail->setText("当前条件下没有记录，可以更换日期或查看全部记录。");
+}
+
+void ReviewWidget::loadEvents()
+{
+    // 界面只调用业务层，不写SQL；先清除旧内容，失败时不会残留上次结果。
+    table->clear();
+    table->setRowCount(0);
+    table->setColumnCount(6);
+    QStringList headers;
+    headers << "编号" << "摄像头" << "时间（UTC）" << "事件类型" << "事件描述" << "状态";
+    table->setHorizontalHeaderLabels(headers);
+    previous->setEnabled(false);
+    next->setEnabled(false);
+    jump->blockSignals(true);
+    jump->setRange(1, 1);
+    jump->setValue(1);
+    jump->setEnabled(false);
+    jump->blockSignals(false);
+
+    EventResult result = eventService.queryLatest(eventConfigPath);
+    if (result.error.isEmpty() == false) {
+        count->setText("新库事件加载失败");
+        detail->setText(result.error);
+        return;
+    }
+
+    for (int row = 0; row < result.events.size(); row++) {
+        EventData event = result.events.at(row);
+        table->insertRow(row);
+        table->setItem(row, 0, new QTableWidgetItem(event.id));
+        table->setItem(row, 1, new QTableWidgetItem(event.cameraName));
+        table->setItem(row, 2, new QTableWidgetItem(event.occurredAt));
+        table->setItem(row, 3, new QTableWidgetItem(event.type));
+        table->setItem(row, 4, new QTableWidgetItem(event.description));
+        table->setItem(row, 5, new QTableWidgetItem(event.status));
+    }
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setStretchLastSection(true);
+    count->setText(QString("新库事件：已显示 %1 条（最多100条）").arg(result.events.size()));
+    detail->setText("当前展示新库最近100条事件；日期和分页将在阶段3接入。合成事件仅供测试，暂不支持录像播放。");
+    if (result.events.isEmpty()) {
+        detail->setText("新库暂无事件。连接和查询已成功，目前没有可显示的数据。");
+    }
 }
