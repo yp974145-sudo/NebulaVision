@@ -2,6 +2,8 @@
 #include "../service/apiclient.h"
 #include <QtConcurrent>
 #include <QFutureWatcher>
+#include <QCloseEvent>
+#include <QCheckBox>
 #include "../util/winmanager.h"
 
 
@@ -30,10 +32,21 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QHBoxLayout *h_layout=new QHBoxLayout;
     QFormLayout *form_layout=new QFormLayout;
     edit_user=new QLineEdit;
+    edit_user->setObjectName("login_username");
+    edit_user->setPlaceholderText("nebula_admin 或 nebula_viewer");
     ediy_pwd=new QLineEdit;
+    ediy_pwd->setObjectName("login_password");
     ediy_pwd->setEchoMode(QLineEdit::Password);
     form_layout->addRow("用户名：",edit_user);
     form_layout->addRow("密码",ediy_pwd);
+    QCheckBox *showPassword=new QCheckBox("显示密码");
+    connect(showPassword,&QCheckBox::toggled,this,[this](bool visible) {
+        ediy_pwd->setEchoMode(visible ? QLineEdit::Normal : QLineEdit::Password);
+    });
+    form_layout->addRow(showPassword);
+    QLabel *accountTip=new QLabel("使用新系统账号；旧系统账号不能直接登录。\n密码见 jk/x/本机登录信息.local.json，需先启动本机服务。");
+    accountTip->setWordWrap(true);
+    form_layout->addRow(accountTip);
 
     //验证码布局容器
     QHBoxLayout *vcode_layout=new QHBoxLayout;
@@ -55,7 +68,10 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QPushButton* btn_reg=new QPushButton("注册");
     btn_reg->setText("账号由管理员创建");
     btn_reg->setEnabled(false); // 不再走旧库注册写入。
-    QPushButton* btn_cancel=new QPushButton("取消");
+    QPushButton* btn_cancel=new QPushButton("返回主界面");
+    btn_cancel->setObjectName("login_back");
+    // close()统一走closeEvent，按钮和右上角关闭使用相同的返回逻辑。
+    connect(btn_cancel,&QPushButton::clicked,this,&QWidget::close);
     btn_layout->addWidget(btn_login);
     btn_layout->addWidget(btn_reg);
     btn_layout->addWidget(btn_cancel);
@@ -95,9 +111,14 @@ void LoginWidget::init_connect()
 
 void LoginWidget::login()
 {
+    if(!btn_login->isEnabled())return;
     QString username=edit_user->text().trimmed();
     QString password=ediy_pwd->text();
     QString vcode=edit_vcode->text().trimmed();
+    if(username.isEmpty() || password.isEmpty()) {
+        QMessageBox::warning(this,"登录提示","请输入用户名和密码");
+        return;
+    }
 
     //先判断验证码，不通过就不去查数据库
     if(vcode.isEmpty()||vcode.compare(vcode_label->code(),Qt::CaseInsensitive)!=0){
@@ -111,10 +132,14 @@ void LoginWidget::login()
     // HTTP登录放到工作线程，避免等待网络时卡住登录窗口。
     struct LoginResult {QJsonObject data;QString error;};
     btn_login->setEnabled(false);
+    int attempt=++loginAttempt;
     ediy_pwd->clear();
     QFutureWatcher<LoginResult> *watcher=new QFutureWatcher<LoginResult>(this);
-    connect(watcher,&QFutureWatcher<LoginResult>::finished,this,[this,watcher,username]() {
-        LoginResult result=watcher->result();watcher->deleteLater();btn_login->setEnabled(true);
+    connect(watcher,&QFutureWatcher<LoginResult>::finished,this,[this,watcher,username,attempt]() {
+        LoginResult result=watcher->result();watcher->deleteLater();
+        // 用户已返回时，不弹旧错误，也不让旧请求突然把账号登录进去。
+        if(attempt!=loginAttempt)return;
+        btn_login->setEnabled(true);
         if(!result.error.isEmpty() || result.data.value("token").toString().isEmpty()) {
             QMessageBox::warning(this,"登录失败",result.error.isEmpty()?"服务端响应无令牌":result.error);
             vcode_label->refresh();edit_vcode->clear();return;
@@ -128,4 +153,16 @@ void LoginWidget::login()
         result.data=ApiClient::request("/api/login",QJsonObject{{"username",username},{"password",password}},true,&result.error);
         return result;
     }));
+}
+
+void LoginWidget::closeEvent(QCloseEvent *event)
+{
+    ++loginAttempt;
+    btn_login->setEnabled(true);
+    ediy_pwd->clear();
+    edit_vcode->clear();
+    vcode_label->refresh();
+    // 返回只切换窗口，不会授予登录权限，原有会话也不会在此修改。
+    WinManager::getInstence()->mainWidget.show();
+    event->accept();
 }

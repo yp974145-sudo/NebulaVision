@@ -35,7 +35,8 @@ QJsonObject ApiClient::request(const QString &path,const QJsonObject &body,bool 
     QJsonDocument document=QJsonDocument::fromJson(reply->readAll());
     if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300 || !document.isObject()) {
         if(error) {
-            if(status==401)*error="请先登录，或登录已过期";
+            if(status==401)*error=path=="/api/login" ? "用户名或密码错误，或账号已停用。请使用新系统账号。" : "请先登录，或登录已过期";
+            else if(status==429)*error="操作过于频繁，请稍后再试";
             else if(status==403)*error="当前账号没有操作权限";
             else if(status>0)*error=QString("API请求失败（HTTP %1）").arg(status);
             else *error="服务端未连接或请求超时，请检查本机服务";

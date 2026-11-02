@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QMessageBox>
 #include "verifycodelabel.h"
+class QCloseEvent;
 class LoginWidget : public QWidget
 {
     Q_OBJECT
@@ -24,6 +25,9 @@ private:
     QLineEdit *ediy_pwd;
     QLineEdit *edit_vcode;          // 验证码输入框
     VerifyCodeLabel *vcode_label;   // 验证码图片
+    int loginAttempt = 0;          // 返回后，忽略旧请求稍后收到的结果。
+protected:
+    void closeEvent(QCloseEvent *event) override;
 public:
     explicit LoginWidget(QWidget *parent = nullptr);
     void init_qss();
