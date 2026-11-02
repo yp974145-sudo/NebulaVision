@@ -46,4 +46,3 @@ EventResult EventRepository::queryLatest(const QString &configPath)
     }
     return result;
 }
-
