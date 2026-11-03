@@ -12,6 +12,9 @@
 #include <QUuid>
 #include <QJsonDocument>
 #include <memory>
+#include <QCheckBox>
+#include <QInputDialog>
+#include <QSaveFile>
 
 MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 {
@@ -75,6 +78,27 @@ void MainWidget::inif_top_widget()
         QPlainTextEdit *output=new QPlainTextEdit(dialog);output->setReadOnly(true);
         output->setObjectName("assistant_output");
         layout->addWidget(question);layout->addWidget(run);layout->addWidget(output);
+        QCheckBox *useDeepSeek=new QCheckBox("使用DeepSeek解读（将问题及查询证据发送到DeepSeek）",dialog);
+        useDeepSeek->setObjectName("assistant_deepseek");
+        QPushButton *settings=new QPushButton("DeepSeek设置",dialog);
+        layout->addWidget(useDeepSeek);layout->addWidget(settings);
+        connect(settings,&QPushButton::clicked,dialog,[=]() {
+            bool accepted=false;
+            QString key=QInputDialog::getText(dialog,"DeepSeek设置",
+                "粘贴DeepSeek开放平台API Key，保存在本机，不上传Git：",QLineEdit::Password,QString(),&accepted);
+            if(!accepted || key.trimmed().isEmpty())return;
+            QString root=QString::fromUtf8(qgetenv("NEBULAVISION_PROJECT_ROOT"));
+            if(root.isEmpty())root=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
+            QString resources=QString::fromUtf8(qgetenv("NEBULAVISION_RESOURCES_ROOT"));
+            if(resources.isEmpty())resources=QDir(root).absoluteFilePath("../x");
+            QSaveFile config(QDir(resources).filePath("deepseek.local.json"));
+            QByteArray bytes=QJsonDocument(QJsonObject{{"model","deepseek-flash"},{"api_key",key.trimmed()}}).toJson();
+            if(!config.open(QIODevice::WriteOnly) || config.write(bytes)!=bytes.size() || !config.commit()){
+                output->setPlainText("DeepSeek设置保存失败，请检查资源目录是否可写。");return;
+            }
+            config.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
+            output->setPlainText("DeepSeek密钥已保存。勾选使用DeepSeek后再查询；该选项会发送问题及证据，并产生平台API用量。");
+        });
         QProcess *process=new QProcess(dialog);
         QTimer *deadline=new QTimer(dialog);deadline->setSingleShot(true);
         connect(deadline,&QTimer::timeout,process,&QProcess::kill);
@@ -94,14 +118,14 @@ void MainWidget::inif_top_widget()
             process->setProgram(python);process->setArguments({root+"/agent/client.py",resources});
             // token通过stdin传递，避免显示在进程命令行中。
             process->setProperty("request",QJsonDocument(QJsonObject{{"token",ApiSession::token()},
-                {"question",question->text()},{"taskId",*task},{"resume",true}}).toJson());
+                {"question",question->text()},{"taskId",*task},{"resume",true},{"deepseek",useDeepSeek->isChecked()}}).toJson());
             process->setProperty("session",ApiSession::token());
             run->setEnabled(false);output->setPlainText("查询中……");process->start();
         });
         connect(process,&QProcess::started,dialog,[=]() {
             process->write(process->property("request").toByteArray());
             process->setProperty("request",QVariant());process->closeWriteChannel();
-            deadline->start(20000);
+            deadline->start(65000);
         });
         connect(process,&QProcess::errorOccurred,dialog,[=](QProcess::ProcessError) {
             deadline->stop();process->setProperty("request",QVariant());

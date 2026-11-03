@@ -6,7 +6,7 @@ from fastembed import TextEmbedding
 
 MODEL = "BAAI/bge-small-zh-v1.5"
 COLLECTION = "operations_v1"
-DOCUMENTS = ["登录与返回修复说明.md", "阶段11_认证权限与面试问答.md",
+DOCUMENTS = ["DeepSeek接入与面试问答.md", "登录与返回修复说明.md", "阶段11_认证权限与面试问答.md",
              "阶段13_录像闭环与面试问答.md", "阶段14_Redis状态与面试问答.md",
              "阶段17_LangGraph查询与面试问答.md", "Qt6迁移_代码原理与面试问答.md"]
 

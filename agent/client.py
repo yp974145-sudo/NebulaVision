@@ -10,16 +10,24 @@ def main():
     from workflow import BusinessTools, run_query
     # Qt发送UTF-8；Windows控制台默认编码可能是GBK，必须显式解码。
     request = json.loads(sys.stdin.buffer.read(16384).decode("utf-8"))
+    def finish(result):
+        if request.get("deepseek", False) and "没有找到可核对的相关证据" not in result["report"]:
+            from deepseek import generate, ModelError
+            try:
+                result["report"] = generate(resource, request["question"], result["report"])
+            except ModelError as error:
+                result["report"] += "\n\nDeepSeek未生成回答：" + str(error)
+        return result
     if request["question"].startswith("文档 "):
         BusinessTools(request["token"]).get("/api/me")
         sys.path.insert(0, str(resource / "rag-python"))
         from retrieval import search
         documents = Path(__file__).resolve().parents[1] / "NebulaVision/docs"
-        return {"report": search(resource, documents, request["question"][3:]), "taskId": request["taskId"]}
+        return finish({"report": search(resource, documents, request["question"][3:]), "taskId": request["taskId"]})
     state = resource / "agent-state"
     state.mkdir(exist_ok=True)
-    return run_query(BusinessTools(request["token"]), request["question"],
-                     request["taskId"], state / "checkpoints.sqlite3", request.get("resume", False))
+    return finish(run_query(BusinessTools(request["token"]), request["question"],
+                     request["taskId"], state / "checkpoints.sqlite3", request.get("resume", False)))
 
 if __name__ == "__main__":
     try:

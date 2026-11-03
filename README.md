@@ -16,7 +16,7 @@
 
 实际采用 Qt HTTP Server、MediaMTX 和 Python gRPC 适配，不能宣称采用 Drogon、ZLMediaKit 或原生 C++ gRPC。当前为本机开发验证：录像是有时长限制的短片，检测是单帧抽样与区域规则，不代表全天连续录像、连续轨迹检测或生产部署完成。
 
-阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。尚未接大语言模型生成。阶段19已验证Windows CMake构建与服务管理器两轮启动停止，Linux、MSVC、Compose和干净机器分发仍待验收，当前没有上传GitHub。
+阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。DeepSeek生成适配、原窗口密钥设置和失败处理已接入，需配置本机API Key后完成真实平台联调，详见[DeepSeek接入说明](NebulaVision/docs/DeepSeek接入与面试问答.md)。阶段19已验证Windows CMake构建与服务管理器两轮启动停止，Linux、MSVC、Compose和干净机器分发仍待验收，当前没有上传GitHub。
 
 ## 构建和本机资源
 
