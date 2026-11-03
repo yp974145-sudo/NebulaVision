@@ -17,6 +17,10 @@ class Engine:
    if result.returncode or not result.stdout or len(result.stdout)>8*1024*1024:raise RuntimeError('frame extraction failed')
    frame=cv2.imdecode(np.frombuffer(result.stdout,np.uint8),cv2.IMREAD_COLOR)
   if frame is None:raise RuntimeError('invalid frame')
+  return self.detect_frame(frame,threshold,roi)
+ def detect_frame(self,frame,threshold=.45,roi=None):
+  # 实时帧与录像抽帧复用同一套前处理、模型和NMS，不写临时图片。
+  if frame is None:raise RuntimeError('invalid frame')
   height,width=frame.shape[:2];gain=min(640/width,640/height);nw,nh=round(width*gain),round(height*gain)
   left,top=(640-nw)//2,(640-nh)//2
   resized=cv2.resize(frame,(nw,nh),interpolation=cv2.INTER_LINEAR)

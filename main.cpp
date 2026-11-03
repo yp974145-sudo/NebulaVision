@@ -3,10 +3,12 @@
 #include "util/winmanager.h"
 #include "util/dbconn.h"
 #include "util/devdbconnection.h"
+#include "util/logredaction.h"
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    installLogRedaction();
     QStringList arguments = a.arguments();
 
     // 带--check-dev-db启动时，只检查新库连接，不打开原窗口或访问旧库。

@@ -39,9 +39,10 @@ def main():
                     if response.status != 200:
                         raise OSError("API is not ready")
                 # 复用已验证的管理器，由它按正式配置打开客户端。
-                subprocess.run([sys.executable, str(script), str(resource)], check=True, timeout=10, creationflags=flags)
+                if '--services-only' not in sys.argv:
+                    subprocess.run([sys.executable, str(script), str(resource)], check=True, timeout=10, creationflags=flags)
                 (runtime / "last-error.txt").unlink(missing_ok=True)
-                print("Services ready. Client opened.", flush=True)
+                print("Services ready." if '--services-only' in sys.argv else "Services ready. Client opened.", flush=True)
                 return
         except (OSError, ValueError, KeyError, psutil.Error):
             pass

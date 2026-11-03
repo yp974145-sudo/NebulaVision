@@ -96,5 +96,9 @@ SOURCES += service/apiclient.cpp
 HEADERS += service/apiclient.h
 
 QT += concurrent
+greaterThan(QT_MAJOR_VERSION, 5) {
+    SOURCES += view/livepreview.cpp
+    HEADERS += view/livepreview.h
+}
 SOURCES += service/reviewquerytask.cpp
 HEADERS += service/reviewquerytask.h

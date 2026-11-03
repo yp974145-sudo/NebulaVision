@@ -1,4 +1,7 @@
 #include "monitorwidget.h"
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+#include "livepreview.h"
+#endif
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -109,14 +112,27 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
         QStringList names;for(int i=0;i<devices.size();i++)names.append(QString::number(i+1)+". "+devices[i].description());
         bool accepted=false;QString selected=QInputDialog::getItem(this,"本机摄像头","选择摄像头",names,0,false,&accepted);
         if(!accepted)return;int index=names.indexOf(selected);if(index<0)return;
-        QDialog *preview=new QDialog(this);preview->setAttribute(Qt::WA_DeleteOnClose);preview->setWindowTitle("本机摄像头预览");preview->resize(720,520);
-        QVBoxLayout *layout=new QVBoxLayout(preview);auto video=new QVideoWidget(preview);layout->addWidget(video,1);
-        QLabel *message=new QLabel("本机预览；后台录像和检测请使用服务端设备。",preview);message->setWordWrap(true);layout->addWidget(message);
-        auto camera=new QCamera(devices[index],preview);auto session=new QMediaCaptureSession(preview);session->setCamera(camera);session->setVideoOutput(video);
-        connect(camera,&QCamera::errorOccurred,preview,[message](QCamera::Error,const QString &error){message->setText("摄像头打开失败："+error+"。请检查是否被其他软件占用及Windows权限。");});
-        connect(preview,&QDialog::finished,camera,&QCamera::stop);preview->show();camera->start();
+        auto preview=new LivePreview(this);preview->show();preview->openCamera(devices[index]);
 #else
         deviceStatus->setText("本机摄像头入口需要Qt6版本。");
+#endif
+    });
+    QPushButton *liveStream=new QPushButton("RTSP实时检测");buttons->addWidget(liveStream,1,4);
+    connect(liveStream,&QPushButton::clicked,this,[this](){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        bool accepted=false;QString url=QInputDialog::getText(this,"网络摄像头实时检测","输入完整RTSP地址（不是单独IP）",QLineEdit::Normal,QString(),&accepted);
+        if(!accepted || !url.trimmed().startsWith("rtsp://"))return;
+        auto preview=new LivePreview(this);preview->show();preview->openStream(url.trimmed());
+#endif
+    });
+    QPushButton *liveDevice=new QPushButton("检测所选设备");leftLayout->addWidget(liveDevice);
+    connect(liveDevice,&QPushButton::clicked,this,[this](){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        if(!deviceList->currentItem()){deviceStatus->setText("先选择设备");return;}
+        QString id=deviceList->currentItem()->data(Qt::UserRole).toString();
+        struct Result {QJsonObject data;QString error;};auto watcher=new QFutureWatcher<Result>(this);
+        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){auto r=watcher->result();watcher->deleteLater();if(!r.error.isEmpty()){deviceStatus->setText(r.error);return;}auto preview=new LivePreview(this);preview->show();preview->openStream(r.data.value("url").toString());});
+        watcher->setFuture(QtConcurrent::run([id](){Result r;r.data=ApiClient::request("/api/media/play",{{"cameraId",id}},true,&r.error);return r;}));
 #endif
     });
     rightLayout->addLayout(buttons);
@@ -161,6 +177,7 @@ void MonitorWidget::openSource(int channel,const QString &source)
 void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop();
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
     for(QCamera *camera:findChildren<QCamera *>())camera->stop();
+    for(LivePreview *preview:findChildren<LivePreview *>())preview->stop();
 #endif
 }
 MonitorWidget::~MonitorWidget() { stopAll(); }

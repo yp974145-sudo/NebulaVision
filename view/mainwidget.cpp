@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QUuid>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <memory>
 #include <QCheckBox>
 #include <QInputDialog>
@@ -61,6 +62,34 @@ void MainWidget::inif_top_widget()
     this->top_layout->addWidget(btn_jiankong);
     btn_review=new QPushButton(QIcon(":/img/视频回放.png"),"回放");
     this->top_layout->addWidget(btn_review);
+    QPushButton *backendPanel=new QPushButton("后台控制");backendPanel->setObjectName("backend_panel");top_layout->addWidget(backendPanel);
+    connect(backendPanel,&QPushButton::clicked,this,[this](){
+        if(auto existing=findChild<QDialog *>("backend_dialog")){existing->show();existing->raise();return;}
+        auto dialog=new QDialog(this);dialog->setObjectName("backend_dialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->resize(760,600);dialog->setWindowTitle("本机后台控制");
+        auto layout=new QVBoxLayout(dialog);layout->addWidget(new QLabel("关闭本窗口不会停止服务；停止后台后登录、录像和检测接口将不可用。"));
+        auto state=new QLabel("读取状态中……");state->setObjectName("backend_state");state->setWordWrap(true);layout->addWidget(state);
+        auto buttons=new QHBoxLayout;auto start=new QPushButton("启动后台");auto stop=new QPushButton("停止后台");start->setObjectName("backend_start");stop->setObjectName("backend_stop");buttons->addWidget(start);buttons->addWidget(stop);layout->addLayout(buttons);
+        auto logs=new QPlainTextEdit;logs->setReadOnly(true);layout->addWidget(logs,1);auto message=new QLabel;message->setWordWrap(true);layout->addWidget(message);
+        QString root=QString::fromUtf8(qgetenv("NEBULAVISION_PROJECT_ROOT"));if(root.isEmpty())root=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
+        QString resources=QString::fromUtf8(qgetenv("NEBULAVISION_RESOURCES_ROOT"));if(resources.isEmpty())resources=QDir(root).absoluteFilePath("../x");
+        QString python=QString::fromUtf8(qgetenv("NEBULAVISION_AGENT_PYTHON"));if(python.isEmpty())python=QDir::homePath()+"/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe";
+        auto probe=new QProcess(dialog);auto command=new QProcess(dialog);auto timer=new QTimer(dialog);timer->setInterval(2000);
+        auto refresh=[=](){if(probe->state()==QProcess::NotRunning)probe->start(python,{root+"/scripts/stack_status.py",resources});};
+        connect(timer,&QTimer::timeout,dialog,refresh);
+        connect(probe,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),dialog,[=](int code,QProcess::ExitStatus){
+            auto data=QJsonDocument::fromJson(probe->readAllStandardOutput()).object();if(code || data.isEmpty()){state->setText("状态读取失败，请检查运行依赖。");return;}
+            QString text=data.value("ready").toBool()?"后台已运行\n":"后台未全部就绪\n";
+            QMap<QString,QString> names{{"supervisor","管理进程"},{"redis","Redis缓存"},{"api","C++业务后端"},{"media","媒体服务"},{"detector","录像检测服务"},{"demo-publisher","演示推流"}};
+            for(const auto &value:data.value("services").toArray()){auto service=value.toObject();QString name=service.value("name").toString();text+=QString("%1：%2（PID %3）\n").arg(names.value(name,name),service.value("alive").toBool()?"运行":"已停止").arg(service.value("pid").toInt());}
+            state->setText(text);logs->setPlainText(data.value("log").toString());
+        });
+        auto run=[=](bool shuttingDown){start->setEnabled(false);stop->setEnabled(false);message->setText(shuttingDown?"停止中……":"启动中……");QStringList args{root+"/scripts/demo_launcher.py",resources,shuttingDown?"--stop":"--services-only"};command->start(python,args);};
+        connect(start,&QPushButton::clicked,dialog,[=](){run(false);});connect(stop,&QPushButton::clicked,dialog,[=](){run(true);});
+        connect(command,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),dialog,[=](int code,QProcess::ExitStatus){start->setEnabled(true);stop->setEnabled(true);message->setText(code?"操作失败，请查看运行日志和端口占用。":"操作完成");refresh();});
+        connect(command,&QProcess::errorOccurred,dialog,[=](QProcess::ProcessError){start->setEnabled(true);stop->setEnabled(true);message->setText("后台控制命令启动失败。");});
+        connect(dialog,&QDialog::finished,dialog,[=](){timer->stop();if(probe->state()!=QProcess::NotRunning)probe->kill();if(command->state()!=QProcess::NotRunning)command->kill();});
+        dialog->show();timer->start();refresh();
+    });
     QPushButton *createAccount=new QPushButton("创建账号");top_layout->addWidget(createAccount);
     connect(createAccount,&QPushButton::clicked,this,[this](){
         if(ApiSession::token().isEmpty()){QMessageBox::information(this,"创建账号","请先以管理员身份登录。");return;}
