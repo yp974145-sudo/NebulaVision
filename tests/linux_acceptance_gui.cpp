@@ -9,6 +9,7 @@
 #include <QVideoFrame>
 #include <QVBoxLayout>
 #include <cstdio>
+#include <QFontDatabase>
 #include "util/winmanager.h"
 #include "util/logredaction.h"
 #include "service/apiclient.h"
@@ -20,6 +21,8 @@ static bool until(const std::function<bool()> &condition,int timeout=45000){
 int main(int argc,char **argv){
     QApplication app(argc,argv);app.setQuitOnLastWindowClosed(false);installLogRedaction();
     if(argc!=4)return 1;
+    bool chineseFont=QFontDatabase::families().contains("Noto Sans CJK SC");
+    printf("LINUX_CJK_FONT=%s\n",chineseFont?"PASS":"FAIL");if(!chineseFont)return 6;
     QString resources=QString::fromLocal8Bit(argv[1]),camera=QString::fromLocal8Bit(argv[2]),clip=QString::fromLocal8Bit(argv[3]);
     QFile file(resources+"/accounts.local.json");if(!file.open(QIODevice::ReadOnly))return 2;
     QJsonObject accounts=QJsonDocument::fromJson(file.readAll()).object();QString error;

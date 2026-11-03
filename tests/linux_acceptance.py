@@ -63,7 +63,8 @@ try:
     assert call('/api/cameras/register',device,viewer)[0]==403;camera=call('/api/cameras/register',device,admin)[1]['id'];assert call('/api/cameras/register',device,admin)[1]['id']==camera;assert call('/api/cameras',token=viewer)[1]['cameras']==[];passed('login, invalid password, anonymous and viewer permission checks')
     result=run(['xvfb-run','-a',build/'linux_gui_acceptance',resources,camera,clip],env=env,capture_output=True,text=True,timeout=180)
     (out/'gui.log').write_text(result.stdout+'\n'+result.stderr)
-    for marker in ['LINUX_MONITOR_FRAMES=PASS','LINUX_REAL_GESTURE_AND_CLIP=PASS','LINUX_IN_PAGE_REPLAY_SEEK_2X=PASS']:assert marker in result.stdout,marker
+    for marker in ['LINUX_CJK_FONT=PASS','LINUX_MONITOR_FRAMES=PASS','LINUX_REAL_GESTURE_AND_CLIP=PASS','LINUX_IN_PAGE_REPLAY_SEEK_2X=PASS']:assert marker in result.stdout,marker
+    passed('Chinese CJK font installed for readable Qt interface')
     passed('Qt GUI, actual FFmpeg frames, real MediaPipe gesture, automatic MP4 and event link');passed('in-page replay frames, pause/resume, seeking and 2x speed')
     event=next(e for e in call('/api/events?size=100',token=admin)[1]['events'] if e['cameraName']==device['name'] and e['type']=='gesture_open_palm');recording=event['recordingId'];assert int(recording)>0
     assert call('/api/recordings/file?id='+recording)[0]==401;assert call('/api/recordings/file?id='+recording,token=viewer)[0]==404

@@ -11,7 +11,8 @@ jobs:
       - name: Install Linux runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg xvfb mysql-server libmysqlclient-dev redis-server libgl1 libegl1 libgles2 libopengl0 libpulse0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0
+          sudo apt-get install -y ffmpeg xvfb mysql-server libmysqlclient-dev redis-server fonts-noto-cjk libgl1 libegl1 libgles2 libopengl0 libpulse0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0
+          fc-match ':lang=zh'
           sudo systemctl start mysql
       - uses: jurplel/install-qt-action@v4
         with:
