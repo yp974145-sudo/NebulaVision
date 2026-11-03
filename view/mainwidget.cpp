@@ -5,6 +5,13 @@
 #include "../service/apiclient.h"
 #include <QtConcurrent>
 #include <QFutureWatcher>
+#include <QDialog>
+#include <QPlainTextEdit>
+#include <QProcess>
+#include <QDir>
+#include <QUuid>
+#include <QJsonDocument>
+#include <memory>
 
 MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 {
@@ -51,8 +58,60 @@ void MainWidget::inif_top_widget()
     this->top_layout->addWidget(btn_jiankong);
     btn_review=new QPushButton(QIcon(":/img/视频回放.png"),"回放");
     this->top_layout->addWidget(btn_review);
-    QPushButton *btn_setting=new QPushButton(QIcon(":/img/设置.png"),"设置");
+    QPushButton *btn_setting=new QPushButton(QIcon(":/img/设置.png"),"查询助手");
     this->top_layout->addWidget(btn_setting);
+    connect(btn_setting,&QPushButton::clicked,this,[this]() {
+        QDialog *dialog=new QDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle("业务查询助手");dialog->resize(680,460);
+        QVBoxLayout *layout=new QVBoxLayout(dialog);
+        layout->addWidget(new QLabel("支持：设备列表、今日事件、2026-11-02 事件（UTC）"));
+        QLineEdit *question=new QLineEdit("设备列表",dialog);
+        QPushButton *run=new QPushButton("查询 / 失败后重试",dialog);
+        QPlainTextEdit *output=new QPlainTextEdit(dialog);output->setReadOnly(true);
+        layout->addWidget(question);layout->addWidget(run);layout->addWidget(output);
+        QProcess *process=new QProcess(dialog);
+        QTimer *deadline=new QTimer(dialog);deadline->setSingleShot(true);
+        connect(deadline,&QTimer::timeout,process,&QProcess::kill);
+        connect(dialog,&QDialog::finished,process,[process]() {if(process->state()!=QProcess::NotRunning)process->kill();});
+        // 一个窗口内同一问题使用同一任务编号，失败重试可从checkpoint继续。
+        auto task=std::make_shared<QString>(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        auto lastQuestion=std::make_shared<QString>();
+        connect(run,&QPushButton::clicked,dialog,[=]() {
+            if(ApiSession::token().isEmpty()){output->setPlainText("请先登录。");return;}
+            if(question->text()!=*lastQuestion){*task=QUuid::createUuid().toString(QUuid::WithoutBraces);*lastQuestion=question->text();}
+            QString root=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
+            QString resources=QDir(root).absoluteFilePath("../x");
+            QString python=QString::fromUtf8(qgetenv("NEBULAVISION_AGENT_PYTHON"));
+            if(python.isEmpty())python=QDir::homePath()+"/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe";
+            process->setProgram(python);process->setArguments({root+"/agent/client.py",resources});
+            // token通过stdin传递，避免显示在进程命令行中。
+            process->setProperty("request",QJsonDocument(QJsonObject{{"token",ApiSession::token()},
+                {"question",question->text()},{"taskId",*task},{"resume",true}}).toJson());
+            process->setProperty("session",ApiSession::token());
+            run->setEnabled(false);output->setPlainText("查询中……");process->start();
+        });
+        connect(process,&QProcess::started,dialog,[=]() {
+            process->write(process->property("request").toByteArray());
+            process->setProperty("request",QVariant());process->closeWriteChannel();
+            deadline->start(20000);
+        });
+        connect(process,&QProcess::errorOccurred,dialog,[=](QProcess::ProcessError) {
+            deadline->stop();process->setProperty("request",QVariant());
+            run->setEnabled(true);output->setPlainText("助手启动或运行失败，请检查Python依赖与本机服务。");
+        });
+        connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),dialog,[=](int,QProcess::ExitStatus) {
+            deadline->stop();
+            run->setEnabled(true);
+            if(ApiSession::token()!=process->property("session").toString()){
+                output->setPlainText("登录状态已改变，请重新查询。");return;
+            }
+            QJsonObject result=QJsonDocument::fromJson(process->readAllStandardOutput()).object();
+            output->setPlainText(result.contains("report")?result.value("report").toString():
+                result.value("error").toString("查询失败或超时，可重试。"));
+        });
+        dialog->show();
+    });
     btn_logout=new QPushButton("退出登录");btn_logout->setEnabled(false);top_layout->addWidget(btn_logout);
 
     lay_time=new QLabel("");
