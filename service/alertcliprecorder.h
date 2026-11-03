@@ -12,14 +12,15 @@ public:
     void begin(const QString &eventKey);
     void finish();
     void retry();
+    void restore(const QString &cameraId);
     void resetHistory(){history.clear();}
 signals:
     void statusChanged(const QString &text);
 private:
     void upload();
     QList<QImage> history,frames;
-    QString key,token,path;
-    int before=0,after=0;
+    QString key,token,path,cameraId;
+    int before=0,after=0,expectedFrames=0;
     bool collecting=false,busy=false;
 };
 #endif

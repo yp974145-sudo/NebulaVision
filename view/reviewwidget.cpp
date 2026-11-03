@@ -77,6 +77,13 @@ ReviewWidget::ReviewWidget(QWidget *parent,const QString &configPath):QWidget(pa
     connect(previous,&QPushButton::clicked,this,[this](){if(page>1){--page;loadPage();}});connect(next,&QPushButton::clicked,this,[this](){if(page<pages){++page;loadPage();}});
     connect(jump,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int value){page=value;loadPage();});
     connect(table,&QTableWidget::cellDoubleClicked,this,[this](int row,int){openRecording(row);});
+    connect(table,&QTableWidget::currentCellChanged,this,[this](int row,int,int,int){
+        if(row<0 || !table->item(row,0))return;
+        resetVideo();
+        bool missing=typeBox->currentIndex()==1 && table->item(row,0)->data(Qt::UserRole).toString().toLongLong()<=0;
+        playTitle->setText((typeBox->currentIndex()==1?"异常事件 #":"录像 #")+table->item(row,0)->data(Qt::UserRole+1).toString()+(missing?" · 无录像":" · 请双击播放"));
+        detail->setText(missing?"此事件没有关联录像，已清空上一段画面。":"请双击当前记录播放对应录像。");
+    });
 }
 void ReviewWidget::refresh(){loadPage();}
 void ReviewWidget::resetQuery(bool date){byDate=date;selectedDate=datePicker->getDate();page=1;loadPage();}
@@ -93,10 +100,16 @@ void ReviewWidget::startQuery(){
 }
 void ReviewWidget::showPage(int id,const RecordPage &result){
     if(id!=generation)return;
-    table->setColumnCount(result.headers.size());table->setHorizontalHeaderLabels(result.headers);
+    QStringList headers=result.headers;if(!headers.isEmpty())headers[0]="序号";headers.append(typeBox->currentIndex()==1?"事件ID":"录像ID");
+    table->setColumnCount(headers.size());table->setHorizontalHeaderLabels(headers);
     if(!result.error.isEmpty()){count->setText("加载失败");detail->setText(result.error);return;}
     for(int row=0;row<result.rows.size();row++){
         table->insertRow(row);for(int col=0;col<result.rows[row].size();col++)table->setItem(row,col,new QTableWidgetItem(result.rows[row][col]));
+        if(table->item(row,0)){
+            QString actualId=table->item(row,0)->text();table->item(row,0)->setData(Qt::UserRole+1,actualId);
+            table->item(row,0)->setText(QString::number((result.page-1)*pageSize->currentText().toInt()+row+1));
+            table->setItem(row,result.headers.size(),new QTableWidgetItem(actualId));
+        }
         if(row<result.recordingIds.size() && table->item(row,0))table->item(row,0)->setData(Qt::UserRole,result.recordingIds[row]);
     }
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
@@ -110,6 +123,7 @@ void ReviewWidget::showPage(int id,const RecordPage &result){
     detail->setText(result.total==0?"当前条件下没有记录。":typeBox->currentIndex()==1?"双击标有可回放的事件播放异常录像；旧事件可能只有文字记录。时间为UTC。":"这里包含手动和自动录像；要按异常查找，请切换异常事件与录像。");
 }
 void ReviewWidget::openRecording(int row){
+    resetVideo(); // 即使本条没有录像，也不能留着上一条的画面和来源。
     int request=++downloadGeneration; // 任何新选择都会使旧下载结果失效。
     if(!table->item(row,0) || !table->item(row,5))return;
     QString id;
@@ -118,14 +132,14 @@ void ReviewWidget::openRecording(int row){
         if(id.isEmpty()){detail->setText("此事件没有关联录像。");return;}
     }else{
         if(table->item(row,5)->text()!="ready"){detail->setText("录像尚未封片或录制失败，不能播放。");return;}
-        id=table->item(row,0)->text();
+        id=table->item(row,0)->data(Qt::UserRole+1).toString();
     }
     bool valid=false;qint64 recordingId=id.toLongLong(&valid);if(!valid || recordingId<=0){detail->setText("没有有效的录像关联");return;}
     QString root=QString::fromUtf8(qgetenv("NEBULAVISION_CACHE_ROOT"));
     QString resources=QString::fromUtf8(qgetenv("NEBULAVISION_RESOURCES_ROOT"));if(root.isEmpty() && !resources.isEmpty())root=resources+"/playback-cache";
     if(root.isEmpty())root=QCoreApplication::applicationDirPath()+"/../../x/playback-cache";QDir().mkpath(root);
     QString session=ApiSession::token();playback->stop();
-    QString title=(typeBox->currentIndex()==1?"异常事件 #"+table->item(row,0)->text()+"  ·  ":QString())+"录像 #"+id;playTitle->setText("加载中  "+title);
+    QString title=(typeBox->currentIndex()==1?"异常事件 #"+table->item(row,0)->data(Qt::UserRole+1).toString()+"  ·  ":QString())+"录像 #"+id;playTitle->setText("加载中  "+title);
     QString localPath=QDir(root).filePath(id+"_"+QUuid::createUuid().toString(QUuid::WithoutBraces)+".mp4");detail->setText("正在授权下载录像……");
     struct Result {QString path,error;};QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
     connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,session,request,title](){Result result=watcher->result();watcher->deleteLater();if(request!=downloadGeneration || session!=ApiSession::token())return;if(!result.error.isEmpty()){detail->setText(result.error);playTitle->setText("加载失败  "+title);return;}
@@ -140,12 +154,15 @@ void ReviewWidget::openRecording(int row){
     watcher->setFuture(QtConcurrent::run([id,localPath](){Result result;result.path=localPath;ApiClient::download("/api/recordings/file?id="+id,localPath,&result.error);return result;}));
 }
 void ReviewWidget::stopPlayback(){++downloadGeneration;playback->stop();}
-void ReviewWidget::clearPlayback(){stopPlayback();++generation;latestDetection.clear();
+void ReviewWidget::resetVideo(){stopPlayback();
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
     playback->setSource(QUrl());
 #else
     playback->setMedia(QUrl());
 #endif
+    updatingSeek=true;seek->setValue(0);seek->setMaximum(0);updatingSeek=false;seek->setEnabled(false);playTime->setText("00:00 / 00:00");playTitle->setText("未加载录像");
+}
+void ReviewWidget::clearPlayback(){resetVideo();++generation;latestDetection.clear();
     table->clearContents();table->setRowCount(0);playTitle->setText("请选择一条有录像的异常事件");detail->setText("请登录后查询录像。");
 }
 ReviewWidget::~ReviewWidget(){if(task){disconnect(task,nullptr,this,nullptr);task->wait();delete task;}}
@@ -153,7 +170,7 @@ ReviewWidget::~ReviewWidget(){if(task){disconnect(task,nullptr,this,nullptr);tas
 void ReviewWidget::detectSelected(){
     int row=table->currentRow();
     if(typeBox->currentIndex()!=0 || row<0 || !table->item(row,5) || table->item(row,5)->text()!="ready") {detail->setText("请切换录像列表，选择一条ready录像。");return;}
-    QString recording=table->item(row,0)->text();QString jobKey="ui_"+QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString recording=table->item(row,0)->data(Qt::UserRole+1).toString();QString jobKey="ui_"+QUuid::createUuid().toString(QUuid::WithoutBraces);
     struct Result{QJsonObject data;QString error;};QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
     connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){Result result=watcher->result();watcher->deleteLater();if(!result.error.isEmpty()){detail->setText(result.error);return;}latestDetection=result.data.value("id").toString();detail->setText("检测任务已提交，等待真实模型结果……");pollDetection(latestDetection,0);});
     watcher->setFuture(QtConcurrent::run([recording,jobKey](){Result result;result.data=ApiClient::request("/api/detections/start",QJsonObject{{"recordingId",recording},{"jobKey",jobKey},{"threshold",.25}},true,&result.error);return result;}));

@@ -28,6 +28,7 @@ private:
     void openRecording(int row);
     void detectSelected();
     void pollDetection(const QString &id,int tries);
+    void resetVideo();
     QString latestDetection;
     DataPicker *datePicker;
     QComboBox *typeBox,*pageSize;

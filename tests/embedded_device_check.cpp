@@ -32,7 +32,7 @@ int main(int argc,char **argv){
     int before=usb?usb->processedFrames:0;if(usb)usb->pause();until([](){return false;},600);bool pauseOkay=usb && usb->processedFrames==before;if(usb)usb->resume();pauseOkay=pauseOkay && until([&](){return usb->processedFrames>before;});
     printf("Embedded USB, four-channel layout, pause/resume: %s\n",four&&pauseOkay?"PASS":"FAIL");
     monitor->stopAll();manager->mainWidget.switch_to_review();auto review=manager->mainWidget.findChild<ReviewWidget *>();auto table=review->findChild<QTableWidget *>("recordTable");int row=-1;
-    bool linked=clip && until([&](){for(int i=0;i<table->rowCount();i++)if(table->item(i,0) && table->item(i,0)->text()==preview->lastSavedEvent && !table->item(i,0)->data(Qt::UserRole).toString().isEmpty()){row=i;return true;}return false;});
+    bool linked=clip && until([&](){for(int i=0;i<table->rowCount();i++)if(table->item(i,0) && table->item(i,0)->data(Qt::UserRole+1).toString()==preview->lastSavedEvent && !table->item(i,0)->data(Qt::UserRole).toString().isEmpty()){row=i;return true;}return false;});
     auto player=review->findChild<QMediaPlayer *>("reviewPlayer");int videoFrames=0;auto surface=review->findChild<QVideoSink *>("reviewVideoSink");QObject::connect(surface,&QVideoSink::videoFrameChanged,&app,[&](const QVideoFrame &frame){if(frame.isValid())++videoFrames;});
     if(linked)table->cellDoubleClicked(row,0);
     bool replay=linked && until([&](){return player->duration()>=1000 && videoFrames>0 && player->isSeekable();});

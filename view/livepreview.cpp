@@ -34,7 +34,7 @@ LivePreview::LivePreview(QWidget *parent):QWidget(parent) {
     clipRecorder=new AlertClipRecorder(this);
     auto clipStatus=new QLabel("异常时自动保存短片：报警前最多3秒＋报警后5秒");clipStatus->setObjectName("clip_status");clipStatus->setWordWrap(true);layout->addWidget(clipStatus);
     auto retryClip=new QPushButton("重试录像");layout->addWidget(retryClip);retryClip->hide();
-    connect(clipRecorder,&AlertClipRecorder::statusChanged,this,[clipStatus,retryClip](const QString &text){clipStatus->setText(text);retryClip->setVisible(text.contains("失败") || text.contains("先重试"));});
+    connect(clipRecorder,&AlertClipRecorder::statusChanged,this,[clipStatus,retryClip](const QString &text){clipStatus->setText(text);retryClip->setVisible(text.contains("失败") || text.contains("重试录像"));});
     connect(retryClip,&QPushButton::clicked,clipRecorder,&AlertClipRecorder::retry);
     clipSample.setInterval(200);connect(&clipSample,&QTimer::timeout,this,[this](){if(!paused && sample.isActive())clipRecorder->sample(latest);});clipSample.start();
     sink=new QVideoSink(this);
@@ -130,7 +130,7 @@ void LivePreview::closeEvent(QCloseEvent *event){stop();worker.waitForFinished(1
 LivePreview::~LivePreview(){stop();worker.waitForFinished(1000);}
 void LivePreview::pause(){clipRecorder->finish();clipRecorder->resetHistory();paused=true;deadline.stop();status->setText("已暂停");}
 void LivePreview::resume(){if(sample.isActive()){paused=false;deadline.start(15000);return;}if(camera){startWorker();camera->start();}else if(!lastUrl.isEmpty())openStream(lastUrl);}
-void LivePreview::setCameraId(const QString &id){cameraId=id;}
+void LivePreview::setCameraId(const QString &id){cameraId=id;clipRecorder->restore(id);}
 // 同一条告警保留同一个eventKey。网络失败后重试，后台不会重复插入。
 void LivePreview::saveAlert(){
     if(saving || pendingAlert.isEmpty())return;
