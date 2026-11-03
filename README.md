@@ -8,6 +8,8 @@
 - [Word 文档](NebulaVision/docs/Word)：阶段 2–19、Qt6 迁移及后续功能改造的代码讲解与面试问答。
 - [异常录像与独立回放](NebulaVision/docs/异常录像与独立回放_代码讲解与面试问答.md)：自动保存手势异常短片、事件关联、进度条和倍速。
 - [设备嵌入与手势入库](NebulaVision/docs/设备嵌入与手势入库_代码讲解与面试问答.md)：统一设备列表、通道内显示、事件入库和网络设备接入边界。
+- [Linux云端运行验收](NebulaVision/docs/Linux云端运行验收_代码讲解与面试问答.md)：Ubuntu24.04上的真实服务、模型、GUI与恢复验证，以及明确未测项。
+- [录像重试与编号修复](NebulaVision/docs/录像重试与编号修复_代码讲解与面试问答.md)：当前会话重试、待上传信息恢复、清空旧回放与连续显示序号。
 - [阶段路线](NebulaVision/docs/沿原源码升级_任务与面试路线.md)：阶段规划，完成情况应结合代码与验收记录核对。
 
 `NebulaVision/README.md`描述的是早期独立基础验证版，不能代替当前原项目的实现说明。
@@ -20,7 +22,7 @@
 
 实际采用 Qt HTTP Server、MediaMTX 和 Python gRPC 适配，不能宣称采用 Drogon、ZLMediaKit 或原生 C++ gRPC。当前为本机开发验证：录像是有时长限制的短片，检测是单帧抽样与区域规则，不代表全天连续录像、连续轨迹检测或生产部署完成。
 
-阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。DeepSeek生成适配、原窗口密钥设置和失败处理已接入，需配置本机API Key后完成真实平台联调，详见[DeepSeek接入说明](NebulaVision/docs/DeepSeek接入与面试问答.md)。阶段19已验证Windows CMake构建与服务管理器两轮启动停止，Linux、MSVC、Compose和干净机器分发仍待验收。
+阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。DeepSeek生成适配、原窗口密钥设置和失败处理已接入，需配置本机API Key后完成真实平台联调，详见[DeepSeek接入说明](NebulaVision/docs/DeepSeek接入与面试问答.md)。阶段19已验证Windows CMake构建与服务管理器两轮启动停止；后续Ubuntu24.04云端已通过编译、数据库权限、真实模型、异常录像、回放和恢复测试，见[真实运行记录](https://github.com/yp974145-sudo/NebulaVision/actions/runs/41626708098)。Linux实体摄像头、MediaMTX网络中继、Agent完整流程、MSVC、Compose和完整分发仍未验收。
 
 ## 构建和本机资源
 
