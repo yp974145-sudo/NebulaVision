@@ -13,14 +13,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg xvfb mysql-server libmysqlclient-dev redis-server libgl1 libegl1 libgles2 libopengl0 libpulse0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0
           sudo systemctl start mysql
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.11.2'
           modules: 'qtmultimedia qthttpserver qtwebsockets'
           cache: true
+      # Qt安装动作内部会切换Python，必须在它之后固定模型所用解释器。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: detector/live-requirements.txt
       - name: Ensure matching Qt MySQL driver
         shell: bash
         run: |
@@ -32,10 +35,12 @@ jobs:
             cmake --install "$RUNNER_TEMP/qt-mysql-build"
           fi
           ldd "$QT_ROOT_DIR/plugins/sqldrivers/libqsqlmysql.so"
+      - name: Install real model inference dependencies
+        run: |
+          python --version
+          python -m pip install -r detector/live-requirements.txt grpcio==1.85.1 grpcio-tools==1.85.1 psutil==7.2.2
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEBULAVISION_ACCEPTANCE=ON
       - run: cmake --build build --parallel 2
-      - name: Install real model inference dependencies
-        run: python -m pip install -r detector/live-requirements.txt grpcio==1.85.1 grpcio-tools==1.85.1 psutil==7.2.2
       - name: Run isolated Linux acceptance
         env:
           NEBULAVISION_CI: '1'
