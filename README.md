@@ -5,7 +5,9 @@
 ## 文档从这里看
 
 - [报告与学习文档目录](NebulaVision/docs/README.md)：设计报告、阶段讲解、面试问答、迁移和问题修复。
-- [Word 文档](NebulaVision/docs/Word)：可下载的阶段 2–16 与 Qt6 迁移学习文档。
+- [Word 文档](NebulaVision/docs/Word)：阶段 2–19、Qt6 迁移及后续功能改造的代码讲解与面试问答。
+- [异常录像与独立回放](NebulaVision/docs/异常录像与独立回放_代码讲解与面试问答.md)：自动保存手势异常短片、事件关联、进度条和倍速。
+- [设备嵌入与手势入库](NebulaVision/docs/设备嵌入与手势入库_代码讲解与面试问答.md)：统一设备列表、通道内显示、事件入库和网络设备接入边界。
 - [阶段路线](NebulaVision/docs/沿原源码升级_任务与面试路线.md)：阶段规划，完成情况应结合代码与验收记录核对。
 
 `NebulaVision/README.md`描述的是早期独立基础验证版，不能代替当前原项目的实现说明。
@@ -14,11 +16,11 @@
 
 当前原程序接入 Qt6 HTTP Server API、业务登录与资源权限、MediaMTX 授权媒体、短片录像和回放、Redis 心跳与限流，以及通过本机 Python 适配器调用 gRPC 检测服务。真实 YOLO ONNX 模型对录像抽帧进行人员检测，事件可关联录像证据。
 
-原监控页另已加入本机摄像头与RTSP的持续采样画框：YOLO人员、OpenCV人脸位置和MediaPipe手势。张开手掌达到阈值并连续三次时显示本窗口提示，连续三次不满足后清除；该实时提示尚未自动写业务事件或录像。顶部后台控制提供本机服务状态、日志和启停。操作与验证见[实时检测与后台窗口说明](NebulaVision/docs/实时人员人脸手势与后台窗口.md)。
+监控页已将本机摄像头与RTSP实时画面嵌入通道，持续采样显示YOLO人员、OpenCV人脸位置和MediaPipe手势。张开手掌达到阈值并连续三次时保存业务事件，自动采集报警前最多3秒及报警后5秒的无声短片，服务端校验后关联到事件。回放页使用独立播放器，支持进度条、拖动和0.5至2倍速，不覆盖监控通道。旧事件可能没有录像；人脸检测不包含身份识别。后台使用独立命令窗口显示状态与脱敏日志。最新操作与验证见上方两篇改造说明，早期文档保留为历史记录。
 
 实际采用 Qt HTTP Server、MediaMTX 和 Python gRPC 适配，不能宣称采用 Drogon、ZLMediaKit 或原生 C++ gRPC。当前为本机开发验证：录像是有时长限制的短片，检测是单帧抽样与区域规则，不代表全天连续录像、连续轨迹检测或生产部署完成。
 
-阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。DeepSeek生成适配、原窗口密钥设置和失败处理已接入，需配置本机API Key后完成真实平台联调，详见[DeepSeek接入说明](NebulaVision/docs/DeepSeek接入与面试问答.md)。阶段19已验证Windows CMake构建与服务管理器两轮启动停止，Linux、MSVC、Compose和干净机器分发仍待验收，当前没有上传GitHub。
+阶段17已加入LangGraph只读查询、checkpoint恢复和证据模板报告；阶段18已加入本机中文嵌入模型与Qdrant文档检索，原Qt窗口完整调用链已验证。DeepSeek生成适配、原窗口密钥设置和失败处理已接入，需配置本机API Key后完成真实平台联调，详见[DeepSeek接入说明](NebulaVision/docs/DeepSeek接入与面试问答.md)。阶段19已验证Windows CMake构建与服务管理器两轮启动停止，Linux、MSVC、Compose和干净机器分发仍待验收。
 
 ## 构建和本机资源
 
