@@ -11,7 +11,7 @@ def call(path,body=None,token=''):
  except urllib.error.HTTPError as e:return e.code,json.load(e)
 accounts=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8-sig'))
 assert call('/api/events')[0]==401
-assert call('/api/login',{'username':'nebula_admin','password':'wrong-test-value'})[0]==401
+assert call('/api/login',{'username':accounts['admin']['username'],'password':'wrong-test-value'})[0]==401
 tokens={}
 for role in ['admin','viewer']:
  code,data=call('/api/login',accounts[role]);assert code==200,(role,code);tokens[role]=data['token']

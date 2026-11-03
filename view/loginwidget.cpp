@@ -33,7 +33,7 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QFormLayout *form_layout=new QFormLayout;
     edit_user=new QLineEdit;
     edit_user->setObjectName("login_username");
-    edit_user->setPlaceholderText("nebula_admin 或 nebula_viewer");
+    edit_user->setPlaceholderText("admin 或 user");
     ediy_pwd=new QLineEdit;
     ediy_pwd->setObjectName("login_password");
     ediy_pwd->setEchoMode(QLineEdit::Password);
