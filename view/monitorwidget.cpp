@@ -1,219 +1,126 @@
 #include "monitorwidget.h"
-#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-#include "livepreview.h"
-#endif
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QFileDialog>
 #include <QInputDialog>
-#include <QLineEdit>
 #include <QFile>
-#include "../service/apiclient.h"
 #include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QJsonArray>
+#include <QSysInfo>
+#include <QCryptographicHash>
 #include <QDialog>
+#include <QFormLayout>
+#include <QSpinBox>
+#include <QLineEdit>
+#include <QUrl>
+#include "../service/apiclient.h"
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-#include <QCamera>
-#include <QCameraDevice>
 #include <QMediaDevices>
-#include <QMediaCaptureSession>
-#include <QVideoWidget>
 #endif
-
-MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
-{
-    QHBoxLayout *mainLayout = new QHBoxLayout(this);
-    QWidget *left = new QWidget(this);
-    left->setObjectName("left_box");
-    QVBoxLayout *leftLayout = new QVBoxLayout(left);
-    left->setMinimumWidth(180);
-    left->setMaximumWidth(240);
-    QLabel *listTitle = new QLabel("预览通道");
-    listTitle->setWordWrap(true);
-    leftLayout->addWidget(listTitle);
-    channelList = new QListWidget(left);
-    for (int i=0;i<4;i++) channelList->addItem(QString("预览通道 %1").arg(i+1));
-    channelList->setCurrentRow(0);
-    leftLayout->addWidget(channelList);
-    leftLayout->addWidget(new QLabel("服务端摄像头（双击打开）"));
-    deviceList=new QListWidget(left);
-    deviceStatus=new QLabel("登录后刷新设备",left);deviceStatus->setWordWrap(true);
-    QPushButton *refresh=new QPushButton("刷新设备",left);
-    leftLayout->addWidget(deviceList);leftLayout->addWidget(deviceStatus);leftLayout->addWidget(refresh);
-    QPushButton *capture=new QPushButton("录制所选设备6秒",left);leftLayout->addWidget(capture);
-    connect(capture,&QPushButton::clicked,this,[this](){
-        if(!deviceList->currentItem()){deviceStatus->setText("先选择服务端摄像头");return;}
-        QString camera=deviceList->currentItem()->data(Qt::UserRole).toString();
-        struct Result {QJsonObject data;QString error;};QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
-        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){Result result=watcher->result();watcher->deleteLater();deviceStatus->setText(result.error.isEmpty()?"后台录制中，稍后到回看页刷新录像列表。":result.error);});
-        watcher->setFuture(QtConcurrent::run([camera](){Result result;result.data=ApiClient::request("/api/recordings/capture",QJsonObject{{"cameraId",camera},{"seconds",6}},true,&result.error);return result;}));
-    });
+namespace {
+QString localKey(const QByteArray &id){return QString::fromLatin1(QCryptographicHash::hash(QSysInfo::machineUniqueId()+id,QCryptographicHash::Sha256).toHex());}
+struct ApiResult{QJsonObject data;QString error;};
+}
+MonitorWidget::MonitorWidget(QWidget *parent):QWidget(parent){
+    auto main=new QHBoxLayout(this);auto left=new QWidget(this);left->setObjectName("left_box");left->setMinimumWidth(205);left->setMaximumWidth(260);auto side=new QVBoxLayout(left);
+    side->addWidget(new QLabel("画面位置"));channelList=new QComboBox;channelList->setObjectName("channelSelector");for(int i=0;i<4;i++)channelList->addItem(QString("通道 %1").arg(i+1));side->addWidget(channelList);
+    side->addWidget(new QLabel("设备列表（双击打开）"));deviceList=new QListWidget;deviceList->setObjectName("cameraDevices");deviceList->setTextElideMode(Qt::ElideRight);side->addWidget(deviceList,1);
+    deviceStatus=new QLabel("请先登录，再刷新设备");deviceStatus->setWordWrap(true);side->addWidget(deviceStatus);
+    auto refresh=new QPushButton("刷新设备");auto add=new QPushButton("添加海康/网络设备");auto capture=new QPushButton("录制所选网络设备6秒");side->addWidget(refresh);side->addWidget(add);side->addWidget(capture);main->addWidget(left);
+    auto right=new QWidget;auto layout=new QVBoxLayout(right);grid=new QGridLayout;layout->addLayout(grid,1);main->addWidget(right,1);
+    for(int i=0;i<4;i++){
+        tiles[i]=new QWidget(right);auto tile=new QVBoxLayout(tiles[i]);tile->setContentsMargins(3,3,3,3);tile->addWidget(new QLabel(QString("通道 %1").arg(i+1)));
+        players[i]=new FfmpegPlayer(tiles[i]);players[i]->setObjectName(QString("previewPlayer%1").arg(i));tile->addWidget(players[i]->videoWidget(),1);
+    }
+    auto buttons=new QHBoxLayout;auto single=new QPushButton("单画面");auto four=new QPushButton("四画面");auto open=new QPushButton("打开视频文件");auto stop=new QPushButton("停止当前");auto all=new QPushButton("全部停止");all->setObjectName("stopAll");
+    for(auto button:{single,four,open,stop,all})buttons->addWidget(button);layout->addLayout(buttons);
+    auto playback=new QHBoxLayout;auto pause=new QPushButton("暂停当前");auto resume=new QPushButton("继续当前");auto pauseAll=new QPushButton("全部暂停");auto resumeAll=new QPushButton("全部继续");pauseAll->setObjectName("pauseAll");resumeAll->setObjectName("resumeAll");
+    for(auto button:{pause,resume,pauseAll,resumeAll})playback->addWidget(button);layout->addLayout(playback);
+    auto pauseChannel=[this](int i,bool paused){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        if(liveViews[i]){if(paused)liveViews[i]->pause();else liveViews[i]->resume();return;}
+#endif
+        if(paused)players[i]->pause();else players[i]->resume();
+    };
+    connect(pause,&QPushButton::clicked,this,[=](){pauseChannel(selectedChannel,true);});connect(resume,&QPushButton::clicked,this,[=](){pauseChannel(selectedChannel,false);});
+    connect(pauseAll,&QPushButton::clicked,this,[=](){for(int i=0;i<4;i++)pauseChannel(i,true);});connect(resumeAll,&QPushButton::clicked,this,[=](){for(int i=0;i<4;i++)pauseChannel(i,false);});
+    connect(single,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel1);connect(four,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel4);
+    connect(channelList,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int row){selectedChannel=row;updateLayout();});
+    connect(stop,&QPushButton::clicked,this,[this](){stopChannel(selectedChannel);});connect(all,&QPushButton::clicked,this,&MonitorWidget::stopAll);
+    connect(open,&QPushButton::clicked,this,[this](){QString path=QFileDialog::getOpenFileName(this,"打开视频",{},"视频 (*.mp4 *.avi *.mkv)");if(!path.isEmpty())openSource(selectedChannel,path);});
     connect(refresh,&QPushButton::clicked,this,&MonitorWidget::refreshDevices);
-    connect(deviceList,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem *item) {
-        QString camera=item->data(Qt::UserRole).toString();int channel=selectedChannel;
-        struct Result {QJsonObject data;QString error;};
-        QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
-        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,channel]() {
-            Result result=watcher->result();watcher->deleteLater();
-            if(!result.error.isEmpty()){deviceStatus->setText(result.error);return;}
-            openSource(channel,result.data.value("url").toString());
-        });
-        watcher->setFuture(QtConcurrent::run([camera](){Result result;result.data=ApiClient::request("/api/media/play",QJsonObject{{"cameraId",camera}},true,&result.error);return result;}));
+    connect(deviceList,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem *item){openDevice(item->data(Qt::UserRole).toJsonObject());});
+    connect(capture,&QPushButton::clicked,this,[this](){
+        if(!deviceList->currentItem()){deviceStatus->setText("先选择网络设备");return;}auto device=deviceList->currentItem()->data(Qt::UserRole).toJsonObject();
+        if(device.value("sourceType").toString()=="local"){deviceStatus->setText("本机设备已接实时检测与事件入库；此按钮用于后台网络录像。");return;}
+        auto watcher=new QFutureWatcher<ApiResult>(this);connect(watcher,&QFutureWatcher<ApiResult>::finished,this,[this,watcher](){auto r=watcher->result();watcher->deleteLater();deviceStatus->setText(r.error.isEmpty()?"后台录制中，稍后到回放页刷新录像。":r.error);});
+        watcher->setFuture(QtConcurrent::run([device](){ApiResult r;r.data=ApiClient::request("/api/recordings/capture",{{"cameraId",device.value("id")},{"seconds",6}},true,&r.error);return r;}));
     });
-    mainLayout->addWidget(left,1);
-
-    QWidget *right = new QWidget(this);
-    QVBoxLayout *rightLayout = new QVBoxLayout(right);
-    grid = new QGridLayout;
-    rightLayout->addLayout(grid,1);
-    mainLayout->addWidget(right,6);
-    // 四个通道各有自己的线程、进程和容量1帧缓存，不共用停止标志。
-    for (int i=0;i<4;i++) {
-        tiles[i] = new QWidget(right);
-        QVBoxLayout *tileLayout = new QVBoxLayout(tiles[i]);
-        tileLayout->addWidget(new QLabel(QString("通道 %1").arg(i+1)));
-        players[i] = new FfmpegPlayer(tiles[i]);
-        players[i]->setObjectName(QString("previewPlayer%1").arg(i));
-        tileLayout->addWidget(players[i]->videoWidget(),1);
-        QLabel *status = new QLabel("未打开视频",tiles[i]);
-        status->setWordWrap(true);
-        tileLayout->addWidget(status);
-        connect(players[i],&VideoPlayer::statusChanged,status,&QLabel::setText);
-        connect(players[i],&VideoPlayer::playbackError,status,&QLabel::setText);
-    }
-    // 按功能分三行，窗口变小时不再被一长排按钮撑住。
-    QGridLayout *buttons = new QGridLayout;
-    QPushButton *single = new QPushButton("单画面");
-    QPushButton *four = new QPushButton("四画面");
-    QPushButton *open = new QPushButton("打开本地视频");
-    QPushButton *stream = new QPushButton("打开RTSP");
-    QPushButton *pause = new QPushButton("暂停当前");
-    QPushButton *resume = new QPushButton("继续/重播当前");
-    QPushButton *stop = new QPushButton("停止当前");
-    QPushButton *pauseAll = new QPushButton("全部暂停");
-    QPushButton *resumeAll = new QPushButton("全部继续/重播");
-    QPushButton *stopAllButton = new QPushButton("全部停止");
-    pauseAll->setObjectName("pauseAll");
-    resumeAll->setObjectName("resumeAll");
-    stopAllButton->setObjectName("stopAll");
-    buttons->addWidget(single,0,0); buttons->addWidget(four,0,1);
-    buttons->addWidget(open,0,2); buttons->addWidget(stream,0,3);
-    buttons->addWidget(pause,1,0); buttons->addWidget(resume,1,1);
-    buttons->addWidget(stop,1,2);
-    buttons->addWidget(pauseAll,2,0); buttons->addWidget(resumeAll,2,1);
-    buttons->addWidget(stopAllButton,2,2);
-    QPushButton *localCamera=new QPushButton("本机/USB摄像头");buttons->addWidget(localCamera,0,4);
-    connect(localCamera,&QPushButton::clicked,this,[this](){
+    connect(add,&QPushButton::clicked,this,[this](){
+        if(ApiSession::token().isEmpty()){deviceStatus->setText("请先以管理员登录");return;}
+        auto dialog=new QDialog(this);dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setWindowTitle("添加海康/网络设备");auto form=new QFormLayout(dialog);
+        auto name=new QLineEdit("海康摄像头");auto host=new QLineEdit;host->setPlaceholderText("摄像头IP");auto user=new QLineEdit("admin");auto password=new QLineEdit;password->setEchoMode(QLineEdit::Password);
+        auto port=new QSpinBox;port->setRange(1,65535);port->setValue(554);auto channel=new QSpinBox;channel->setRange(1,256);auto stream=new QComboBox;stream->addItems({"子码流（低带宽）","主码流"});
+        form->addRow("设备名称",name);form->addRow("IP/主机名",host);form->addRow("RTSP端口",port);form->addRow("摄像头账号",user);form->addRow("摄像头密码",password);form->addRow("通道",channel);form->addRow("海康码流",stream);
+        auto custom=new QLineEdit;custom->setPlaceholderText("其他型号可填完整RTSP地址（可留空）");custom->setEchoMode(QLineEdit::PasswordEchoOnEdit);form->addRow("自定义RTSP",custom);
+        auto result=new QLabel;result->setWordWrap(true);auto save=new QPushButton("添加设备");form->addRow(result);form->addRow(save);
+        connect(save,&QPushButton::clicked,dialog,[=](){QUrl url;url.setScheme("rtsp");url.setHost(host->text().trimmed());url.setPort(port->value());url.setUserName(user->text());url.setPassword(password->text());url.setPath(QString("/Streaming/Channels/%1").arg(channel->value()*100+(stream->currentIndex()==0?2:1)));
+            QString address=custom->text().trimmed().isEmpty()?url.toString(QUrl::FullyEncoded):custom->text().trimmed();if(!QUrl(address).isValid() || QUrl(address).host().isEmpty()){result->setText("请填写IP或完整RTSP地址");return;}
+            if(QUrl(address).scheme()!="rtsp" && QUrl(address).scheme()!="rtsps"){result->setText("需要RTSP视频地址，Seetong等App分享链接不能直接填写。");return;}
+            QJsonObject body{{"name",name->text().trimmed()},{"sourceType","rtsp"},{"url",address}};save->setEnabled(false);auto watcher=new QFutureWatcher<ApiResult>(dialog);
+            connect(watcher,&QFutureWatcher<ApiResult>::finished,dialog,[=](){auto r=watcher->result();watcher->deleteLater();save->setEnabled(true);if(!r.error.isEmpty()){result->setText(r.error);return;}dialog->close();refreshDevices();});
+            watcher->setFuture(QtConcurrent::run([body](){ApiResult r;r.data=ApiClient::request("/api/cameras/register",body,true,&r.error);return r;}));
+        });dialog->show();
+    });
+    QFile qss(":/qss/monitor.qss");if(qss.open(QIODevice::ReadOnly))setStyleSheet(qss.readAll());updateLayout();
+}
+void MonitorWidget::stopChannel(int channel){++openGeneration[channel];players[channel]->stop();
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-        const QList<QCameraDevice> devices=QMediaDevices::videoInputs();
-        if(devices.isEmpty()){deviceStatus->setText("未发现本机摄像头。请检查USB连接及Windows摄像头隐私权限。");return;}
-        QStringList names;for(int i=0;i<devices.size();i++)names.append(QString::number(i+1)+". "+devices[i].description());
-        bool accepted=false;QString selected=QInputDialog::getItem(this,"本机摄像头","选择摄像头",names,0,false,&accepted);
-        if(!accepted)return;int index=names.indexOf(selected);if(index<0)return;
-        auto preview=new LivePreview(this);preview->show();preview->openCamera(devices[index]);
+    if(liveViews[channel])liveViews[channel]->stop();
+#endif
+}
+void MonitorWidget::stopAll(){for(int i=0;i<4;i++)stopChannel(i);}
+MonitorWidget::~MonitorWidget(){stopAll();}
+void MonitorWidget::openSource(int channel,const QString &source){if(channel<0 || channel>=4)return;stopChannel(channel);
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    if(liveViews[channel]){liveViews[channel]->hide();liveViews[channel]->deleteLater();liveViews[channel]=nullptr;}
+#endif
+    players[channel]->videoWidget()->show();channelList->setCurrentIndex(channel);players[channel]->open(source);
+}
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+// 把实时检测控件放到已有通道布局里。父对象是通道，不再创建独立窗口。
+void MonitorWidget::embedLive(int channel,LivePreview *view){stopChannel(channel);if(liveViews[channel]){liveViews[channel]->hide();liveViews[channel]->deleteLater();}liveViews[channel]=view;players[channel]->videoWidget()->hide();static_cast<QVBoxLayout *>(tiles[channel]->layout())->addWidget(view,1);view->show();}
+#endif
+void MonitorWidget::openDevice(const QJsonObject &device){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    int channel=selectedChannel;int generation=++openGeneration[channel];QString type=device.value("sourceType").toString(),id=device.value("id").toString();
+    if(type=="local"){
+        for(const auto &camera:QMediaDevices::videoInputs())if(localKey(camera.id())==device.value("sourceKey").toString()){
+            auto view=new LivePreview(tiles[channel]);view->setCameraId(id);embedLive(channel,view);view->openCamera(camera);return;
+        }
+        deviceStatus->setText("此本机设备不在当前电脑上或已拔出");return;
+    }
+    auto watcher=new QFutureWatcher<ApiResult>(this);connect(watcher,&QFutureWatcher<ApiResult>::finished,this,[this,watcher,channel,id,generation](){auto r=watcher->result();watcher->deleteLater();if(generation!=openGeneration[channel])return;if(!r.error.isEmpty()){deviceStatus->setText(r.error);return;}auto view=new LivePreview(tiles[channel]);view->setCameraId(id);embedLive(channel,view);view->openStream(r.data.value("url").toString());});
+    watcher->setFuture(QtConcurrent::run([type,id](){ApiResult r;if(type=="rtsp")r.data=ApiClient::request("/api/cameras/source?id="+id,{},false,&r.error);else r.data=ApiClient::request("/api/media/play",{{"cameraId",id}},true,&r.error);return r;}));
 #else
-        deviceStatus->setText("本机摄像头入口需要Qt6版本。");
+    Q_UNUSED(device);
 #endif
-    });
-    QPushButton *liveStream=new QPushButton("RTSP实时检测");buttons->addWidget(liveStream,1,4);
-    connect(liveStream,&QPushButton::clicked,this,[this](){
+}
+void MonitorWidget::switch_to_channel1(){fourViews=false;updateLayout();}
+void MonitorWidget::switch_to_channel4(){fourViews=true;updateLayout();}
+void MonitorWidget::updateLayout(){for(int i=0;i<4;i++){grid->removeWidget(tiles[i]);bool visible=fourViews || i==selectedChannel;tiles[i]->setVisible(visible);if(visible)grid->addWidget(tiles[i],fourViews?i/2:0,fourViews?i%2:0);}grid->setRowStretch(0,1);grid->setColumnStretch(0,1);grid->setRowStretch(1,fourViews?1:0);grid->setColumnStretch(1,fourViews?1:0);}
+// 管理员同步当前电脑的摄像头；普通用户只读取后台授权的设备列表。
+void MonitorWidget::refreshDevices(){
+    if(ApiSession::token().isEmpty()){deviceList->clear();deviceStatus->setText("请先登录");return;}deviceStatus->setText("读取并同步设备……");QJsonArray local;
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-        bool accepted=false;QString url=QInputDialog::getText(this,"网络摄像头实时检测","输入完整RTSP地址（不是单独IP）",QLineEdit::Normal,QString(),&accepted);
-        if(!accepted || !url.trimmed().startsWith("rtsp://"))return;
-        auto preview=new LivePreview(this);preview->show();preview->openStream(url.trimmed());
+    for(const auto &camera:QMediaDevices::videoInputs())local.append(QJsonObject{{"sourceType","local"},{"name",camera.description()},{"sourceKey",localKey(camera.id())}});
 #endif
-    });
-    QPushButton *liveDevice=new QPushButton("检测所选设备");leftLayout->addWidget(liveDevice);
-    connect(liveDevice,&QPushButton::clicked,this,[this](){
-#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-        if(!deviceList->currentItem()){deviceStatus->setText("先选择设备");return;}
-        QString id=deviceList->currentItem()->data(Qt::UserRole).toString();
-        struct Result {QJsonObject data;QString error;};auto watcher=new QFutureWatcher<Result>(this);
-        connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){auto r=watcher->result();watcher->deleteLater();if(!r.error.isEmpty()){deviceStatus->setText(r.error);return;}auto preview=new LivePreview(this);preview->show();preview->openStream(r.data.value("url").toString());});
-        watcher->setFuture(QtConcurrent::run([id](){Result r;r.data=ApiClient::request("/api/media/play",{{"cameraId",id}},true,&r.error);return r;}));
-#endif
-    });
-    rightLayout->addLayout(buttons);
-    QLabel *hint = new QLabel("左侧选择通道后打开视频。暂停后继续；停止或结束后从头重播。预览静音。");
-    hint->setWordWrap(true);
-    rightLayout->addWidget(hint);
-    connect(single,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel1);
-    connect(four,&QPushButton::clicked,this,&MonitorWidget::switch_to_channel4);
-    connect(channelList,&QListWidget::currentRowChanged,this,[this](int row){
-        if(row>=0 && row<4) {selectedChannel=row;updateLayout();}
-    });
-    connect(open,&QPushButton::clicked,this,[this](){
-        QString path=QFileDialog::getOpenFileName(this,"打开当前通道视频",QString(),"视频 (*.mp4 *.avi *.mkv *.wmv);;全部文件 (*)");
-        if(!path.isEmpty()) openSource(selectedChannel,path);
-    });
-    connect(stream,&QPushButton::clicked,this,[this](){
-        bool accepted=false;
-        QString url=QInputDialog::getText(this,"打开当前通道RTSP","地址仅用于本次预览",QLineEdit::Normal,
-                                         QString(),&accepted);
-        if(accepted && !url.trimmed().isEmpty()) openSource(selectedChannel,url.trimmed());
-    });
-    connect(pause,&QPushButton::clicked,this,[this](){players[selectedChannel]->pause();});
-    connect(resume,&QPushButton::clicked,this,[this](){players[selectedChannel]->resume();});
-    connect(stop,&QPushButton::clicked,this,[this](){players[selectedChannel]->stop();});
-    connect(pauseAll,&QPushButton::clicked,this,[this](){
-        for(int i=0;i<4;i++) players[i]->pause();
-    });
-    connect(resumeAll,&QPushButton::clicked,this,[this](){
-        for(int i=0;i<4;i++) players[i]->resume();
-    });
-    connect(stopAllButton,&QPushButton::clicked,this,&MonitorWidget::stopAll);
-    QFile qss(":/qss/monitor.qss");
-    if(qss.open(QIODevice::ReadOnly)) setStyleSheet(qss.readAll());
-    updateLayout();
-}
-void MonitorWidget::openSource(int channel,const QString &source)
-{
-    if(channel<0 || channel>=4) return;
-    channelList->setCurrentRow(channel); // 回放指定通道时同步选择，避免视频在隐藏槽播放。
-    players[channel]->open(source);
-}
-void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop();
-#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
-    for(QCamera *camera:findChildren<QCamera *>())camera->stop();
-    for(LivePreview *preview:findChildren<LivePreview *>())preview->stop();
-#endif
-}
-MonitorWidget::~MonitorWidget() { stopAll(); }
-void MonitorWidget::switch_to_channel1() { fourViews=false;updateLayout(); }
-void MonitorWidget::switch_to_channel4() { fourViews=true;updateLayout(); }
-void MonitorWidget::updateLayout()
-{
-    // 复用同一组显示控件，切布局不新建播放器，也不重复解码。
-    for(int i=0;i<4;i++) {
-        grid->removeWidget(tiles[i]);
-        bool visible = fourViews || i==selectedChannel;
-        tiles[i]->setVisible(visible);
-        if(visible) {
-            if(fourViews) grid->addWidget(tiles[i],i/2,i%2);
-            else grid->addWidget(tiles[i],0,0);
-        }
-    }
-    grid->setRowStretch(0,1);grid->setColumnStretch(0,1);
-    grid->setRowStretch(1,fourViews?1:0);grid->setColumnStretch(1,fourViews?1:0);
-}
-
-void MonitorWidget::refreshDevices()
-{
-    deviceStatus->setText("正在读取服务端设备……");
-    struct Result {QJsonObject data;QString error;};
-    QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
-    connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher]() {
-        Result result=watcher->result();watcher->deleteLater();deviceList->clear();
-        if(!result.error.isEmpty()){deviceStatus->setText(result.error);return;}
-        QJsonArray devices=result.data.value("cameras").toArray();
-        for(int i=0;i<devices.size();i++) {
-            QJsonObject camera=devices[i].toObject();
-            QListWidgetItem *item=new QListWidgetItem(camera.value("name").toString()+" ["+camera.value("status").toString()+"]",deviceList);
-            item->setData(Qt::UserRole,camera.value("id").toString());
-        }
-        deviceStatus->setText(QString("可访问设备 %1 个").arg(devices.size()));
-    });
-    watcher->setFuture(QtConcurrent::run([](){Result result;result.data=ApiClient::request("/api/cameras",{},false,&result.error);return result;}));
+    QString session=ApiSession::token();auto watcher=new QFutureWatcher<ApiResult>(this);connect(watcher,&QFutureWatcher<ApiResult>::finished,this,[this,watcher,session](){auto r=watcher->result();watcher->deleteLater();if(ApiSession::token()!=session)return;deviceList->clear();if(!r.error.isEmpty()){deviceStatus->setText(r.error);return;}
+        for(const auto &value:r.data.value("cameras").toArray()){auto camera=value.toObject();QString type=camera.value("sourceType").toString();QString label=(type=="local"?"[本机] ":type=="rtsp"?"[网络] ":"[中继] ")+camera.value("name").toString();auto item=new QListWidgetItem(label,deviceList);item->setToolTip(label);item->setData(Qt::UserRole,camera);}
+        deviceStatus->setText("双击设备→当前通道；手势异常自动入库。");
+    });watcher->setFuture(QtConcurrent::run([local](){ApiResult r;auto me=ApiClient::request("/api/me",{},false,&r.error);if(!r.error.isEmpty())return r;
+        if(me.value("admin").toBool())for(const auto &value:local){ApiClient::request("/api/cameras/register",value.toObject(),true,&r.error);if(!r.error.isEmpty())return r;}
+        r.data=ApiClient::request("/api/cameras",{},false,&r.error);return r;}));
 }

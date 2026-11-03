@@ -5,13 +5,15 @@ from pathlib import Path
 def install(resource):
     root = Path(__file__).resolve().parents[1]
     script = str(root / "scripts/demo_launcher.py").replace("'", "''")
-    ps = """param([switch]$Stop)
+    ps = """param([switch]$Stop,[switch]$BackendOnly,[switch]$ClientOnly)
 $ErrorActionPreference = 'Stop'
 $taskPython = Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
 $taskScript = 'SCRIPT_PATH'
 if (!(Test-Path -LiteralPath $taskPython)) { Write-Host 'ERROR: Python runtime is missing.'; exit 1 }
 if (!(Test-Path -LiteralPath $taskScript)) { Write-Host 'ERROR: Project launcher is missing.'; exit 1 }
-if ($Stop) { & $taskPython $taskScript $PSScriptRoot --stop } else { & $taskPython $taskScript $PSScriptRoot }
+if ($BackendOnly) { & $taskPython (Join-Path (Split-Path $taskScript) 'backend_console.py') $PSScriptRoot }
+elseif ($ClientOnly) { & $taskPython $taskScript $PSScriptRoot --client-only }
+elseif ($Stop) { & $taskPython $taskScript $PSScriptRoot --stop } else { & $taskPython $taskScript $PSScriptRoot }
 exit $LASTEXITCODE
 """.replace("SCRIPT_PATH", script)
     resource.mkdir(exist_ok=True)
@@ -20,7 +22,8 @@ exit $LASTEXITCODE
     stop = "& (Join-Path $PSScriptRoot 'start-demo.ps1') -Stop\r\nexit $LASTEXITCODE\r\n"
     (resource / "停止本机演示服务.ps1").write_bytes(stop.encode("ascii"))
     for name, argument in [("启动完整演示.cmd", ""), ("启动阶段9到16完整演示.cmd", ""),
-                           ("停止完整演示.cmd", " -Stop"), ("停止阶段9到16演示服务.cmd", " -Stop")]:
+                           ("停止完整演示.cmd", " -Stop"), ("停止阶段9到16演示服务.cmd", " -Stop"),
+                           ("启动后端.cmd", " -BackendOnly"),("启动客户端.cmd", " -ClientOnly"),("停止后端.cmd", " -Stop")]:
         lines = ["@echo off", 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-demo.ps1"' + argument,
                  'set "launch_rc=%errorlevel%"', 'if not "%launch_rc%"=="0" pause', 'exit /b %launch_rc%']
         (resource / name).write_bytes(("\r\n".join(lines) + "\r\n").encode("ascii"))

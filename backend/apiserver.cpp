@@ -32,6 +32,7 @@ ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
     QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat","/api/detections/start","/api/detections/job"};
     paths.append("/api/users");
+    paths.append("/api/cameras/register");paths.append("/api/cameras/source");paths.append("/api/events/gesture");
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -150,6 +151,53 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         QMutexLocker lock(&sessionMutex);auto &counter=fallbackLimits[userId];qint64 minute=QDateTime::currentSecsSinceEpoch()/60;
         if(counter.second!=minute){counter={0,minute};}if(++counter.first>limit)return fail("local rate limit exceeded",429);
     }
+    if(request.path=="/api/cameras/register") {
+        if(!admin)return fail("admin required",403);
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        QString type=request.body.value("sourceType").toString(),name=request.body.value("name").toString().trimmed();
+        QString source=request.body.value("url").toString(),sourceKey=request.body.value("sourceKey").toString();
+        if(name.isEmpty() || name.size()>128 || (type!="local" && type!="rtsp"))return fail("invalid device",400);
+        if(type=="local") {if(!QRegularExpression("^[a-f0-9]{64}$").match(sourceKey).hasMatch())return fail("invalid source key",400);source.clear();}
+        else {QUrl url(source);if(source.size()>1024 || !url.isValid() || url.host().isEmpty() || (url.scheme()!="rtsp" && url.scheme()!="rtsps"))return fail("invalid RTSP URL",400);sourceKey=QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(),QCryptographicHash::Sha256).toHex());}
+        auth.prepare("INSERT INTO cameras(camera_key,name,stream_url,enabled,source_type,source_key) VALUES (?,?,?,1,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)");
+        auth.addBindValue("cam-"+QUuid::createUuid().toString(QUuid::WithoutBraces));auth.addBindValue(name);auth.addBindValue(source);auth.addBindValue(type);auth.addBindValue(sourceKey);
+        if(!auth.exec())return fail("device insert failed",500);
+        return reply(QJsonObject{{"id",auth.lastInsertId().toString()},{"sourceType",type}},201);
+    }
+    if(request.path=="/api/cameras/source") {
+        bool valid=false;qint64 id=request.query.queryItemValue("id").toLongLong(&valid);if(!valid || id<=0)return fail("invalid camera",400);
+        auth.prepare("SELECT stream_url,source_type,enabled FROM cameras WHERE id=?");auth.addBindValue(id);
+        if(!auth.exec() || !auth.next())return fail("camera missing",404);
+        QString url=auth.value(0).toString(),type=auth.value(1).toString();bool enabled=auth.value(2).toBool();auth.finish();
+        if(!admin){auth.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");auth.addBindValue(userId);auth.addBindValue(id);if(!auth.exec() || !auth.next())return fail("camera forbidden",403);}
+        if(!enabled)return fail("camera disabled",409);
+        if(type!="rtsp")return fail("not a direct RTSP device",400);
+        return reply(QJsonObject{{"url",url},{"sourceType",type}});
+    }
+    if(request.path=="/api/events/gesture") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        bool valid=false;qint64 camera=request.body.value("cameraId").toString().toLongLong(&valid);
+        QString eventKey=request.body.value("eventKey").toString();double confidence=request.body.value("confidence").toDouble(-1);
+        if(!valid || camera<=0 || !QRegularExpression("^[a-f0-9-]{36}$").match(eventKey).hasMatch() || !qIsFinite(confidence) || confidence<.6 || confidence>1 || request.body.value("gesture").toString()!="Open_Palm" || request.body.value("consecutive").toInt()<3)return fail("invalid gesture event",400);
+        if(!admin){auth.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");auth.addBindValue(userId);auth.addBindValue(camera);if(!auth.exec() || !auth.next())return fail("camera forbidden",403);}
+        // 事件、审计和回执一起成功或一起撤销，避免界面看到半条入库结果。
+        auth.finish();if(!connection.db.transaction())return fail("transaction unavailable",500);
+        auto abort=[&](int code){auth.finish();connection.db.rollback();return fail("event save failed",code);};
+        // 按摄像头加行锁，让同一设备的并发上报依次检查10秒合并规则。
+        auth.prepare("SELECT enabled FROM cameras WHERE id=? FOR UPDATE");auth.addBindValue(camera);if(!auth.exec() || !auth.next())return abort(404);if(!auth.value(0).toBool())return abort(409);auth.finish();
+        auth.prepare("SELECT event_id,camera_id FROM live_event_receipts WHERE request_key=?");auth.addBindValue(eventKey);
+        if(!auth.exec())return abort(500);
+        if(auth.next()){QString id=auth.value(0).toString();if(auth.value(1).toLongLong()!=camera)return abort(409);auth.finish();if(!connection.db.commit())return abort(500);return reply(QJsonObject{{"id",id},{"reused",true}});}
+        auto receipt=[&](const QString &id){auth.finish();auth.prepare("INSERT INTO live_event_receipts(request_key,event_id,camera_id,actor_id) VALUES (?,?,?,?)");auth.addBindValue(eventKey);auth.addBindValue(id);auth.addBindValue(camera);auth.addBindValue(userId);return auth.exec();};
+        auth.finish();auth.prepare("SELECT id FROM events WHERE camera_id=? AND event_type='gesture_open_palm' AND occurred_at>UTC_TIMESTAMP(3)-INTERVAL 10 SECOND ORDER BY id DESC LIMIT 1");auth.addBindValue(camera);
+        if(!auth.exec())return abort(500);
+        if(auth.next()){QString id=auth.value(0).toString();if(!receipt(id))return abort(500);auth.finish();if(!connection.db.commit())return abort(500);return reply(QJsonObject{{"id",id},{"reused",true}});}
+        auth.finish();auth.prepare("INSERT INTO events(event_key,camera_id,occurred_at,event_type,description,confidence,model_version,status) VALUES (?,?,UTC_TIMESTAMP(3),'gesture_open_palm',?,?,?,'new')");
+        auth.addBindValue("live:"+eventKey);auth.addBindValue(camera);auth.addBindValue("客户端实时模型上报：张开手掌连续3次，置信度达到0.60；无自动录像。");auth.addBindValue(confidence);auth.addBindValue("mediapipe-gesture-v1");
+        if(!auth.exec())return abort(500);QString id=auth.lastInsertId().toString();auth.finish();
+        auth.prepare("INSERT INTO audit_logs(actor_id,action,resource_type,resource_id) VALUES (?,'report_gesture','event',?)");auth.addBindValue(userId);auth.addBindValue(id);if(!auth.exec())return abort(500);auth.finish();
+        if(!receipt(id))return abort(500);auth.finish();if(!connection.db.commit())return abort(500);qInfo().noquote()<<"gesture_event_saved camera="<<camera<<" event="<<id;return reply(QJsonObject{{"id",id},{"reused",false}},201);
+    }
     if(request.path=="/api/users") {
         if(!admin)return fail("admin required",403);
         if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
@@ -226,13 +274,15 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
             bool valid=false;qint64 camera=request.body.value("cameraId").toString().toLongLong(&valid);
             int seconds=request.body.value("seconds").toInt(4);
             if(!valid || camera<=0 || seconds<2 || seconds>30)return fail("invalid capture",400);
-            auth.prepare("SELECT camera_key,enabled FROM cameras WHERE id=?");auth.addBindValue(camera);
+            auth.prepare("SELECT camera_key,enabled,source_type,stream_url FROM cameras WHERE id=?");auth.addBindValue(camera);
             if(!auth.exec() || !auth.next())return fail("camera missing",404);
             if(!auth.value(1).toBool())return fail("camera disabled",409);
+            if(auth.value(2).toString()=="local")return fail("local recording requires client capture",409);
             QString stream=auth.value(0).toString();
             QDateTime expires=QDateTime::currentDateTimeUtc().addSecs(120);
             QJsonObject claims{{"session",key},{"cameraId",QString::number(camera)},{"path",stream},{"action","read"},{"expires",double(expires.toSecsSinceEpoch())}};
             QString url="rtsp://127.0.0.1:18554/"+stream+"?token="+MediaAdapter::sign(claims,config.value("media_secret").toString());
+            if(auth.value(2).toString()=="rtsp")url=auth.value(3).toString();
             QString filename=QUuid::createUuid().toString(QUuid::WithoutBraces)+".mp4";
             auth.prepare("INSERT INTO recordings(camera_id,started_at,object_key,status) VALUES (?,UTC_TIMESTAMP(3),?,'writing')");auth.addBindValue(camera);auth.addBindValue(filename);
             if(!auth.exec())return fail("recording insert failed",500);
@@ -315,14 +365,14 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
     if(request.method!=QHttpServerRequest::Method::Get)return fail("method not allowed",405);
     QSqlQuery query(connection.db);
     if(request.path=="/api/cameras") {
-        if(!query.exec(QString("SELECT id,name,status,enabled FROM cameras c %1 ORDER BY id").arg(admin?QString():QString("WHERE EXISTS(SELECT 1 FROM user_camera_permissions p WHERE p.user_id=%1 AND p.camera_id=c.id)").arg(userId))))return fail("camera query failed",500);
+        if(!query.exec(QString("SELECT id,name,status,enabled,source_type,source_key FROM cameras c %1 ORDER BY id").arg(admin?QString():QString("WHERE EXISTS(SELECT 1 FROM user_camera_permissions p WHERE p.user_id=%1 AND p.camera_id=c.id)").arg(userId))))return fail("camera query failed",500);
         QJsonArray rows;
         while(query.next()) {
             bool ok=false;QString id=query.value(0).toString();
             QVariant alive=RedisClient::command(redisPort,QStringList()<<"GET"<<"nv:camera:"+id,&ok);
             QString status=ok?(alive.isValid()?"online":"offline"):"unknown";
             rows.append(QJsonObject{{"id",id},{"name",query.value(1).toString()},{"status",status},
-                {"enabled",query.value(3).toBool()},{"statusSource",ok?"redis":"unavailable"}});
+                {"enabled",query.value(3).toBool()},{"sourceType",query.value(4).toString()},{"sourceKey",query.value(5).toString()},{"statusSource",ok?"redis":"unavailable"}});
         }
         return reply(QJsonObject{{"cameras",rows}});
     }

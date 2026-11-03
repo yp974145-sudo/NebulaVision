@@ -15,6 +15,7 @@ int main(int argc,char **argv) {
     if(!doc.isObject())return 2;
     ApiServer server(doc.object());
     if(!server.listen())return 3;
+    qInfo("NebulaVision C++ backend ready: http://127.0.0.1:18880");
     {
         // 已独占监听端口后才恢复旧任务，防止第二个实例干扰正在录制的实例。
         ServerDb db(doc.object());QSqlQuery recovery(db.db);

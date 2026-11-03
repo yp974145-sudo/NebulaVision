@@ -13,3 +13,11 @@ QListWidget QScrollBar:vertical{ width:0px; background-color:transparent; margin
 QListWidget QScrollBar:horizontal{ height:0px; }
 QListWidget QScrollBar::handle, QListWidget QScrollBar::add-line, QListWidget QScrollBar::sub-line, QListWidget QScrollBar::add-page, QListWidget QScrollBar::sub-page{ background:transparent; }
 QLabel { color:#e6e6e6; }
+#cameraDevices { background:#282d35; color:#eeeeee; font-size:11pt; border:1px solid #505865; border-radius:5px; }
+#cameraDevices::item { color:#eeeeee; min-height:38px; height:auto; padding:6px; font-size:11pt; }
+#cameraDevices::item:selected { background:#346da8; color:white; border-left:3px solid #7ebcff; }
+#cameraDevices::item:hover { background:#46515e; color:white; }
+#cameraDevices QScrollBar:vertical { width:10px; }
+#left_box QComboBox { color:white; background:#262b33; padding:6px; }
+QCheckBox, QDoubleSpinBox { color:#eeeeee; }
+QDoubleSpinBox { background:#262b33; }

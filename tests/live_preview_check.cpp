@@ -49,18 +49,11 @@ int main(int argc,char **argv){
         gesture->stop();gesture->close();QApplication::processEvents();
         fprintf(stdout,"Real hand video -> gesture alert: %s\n",gesturePass?"PASS":"FAIL");
     }
-    auto manager=WinManager::getInstence();manager->mainWidget.show();manager->mainWidget.findChild<QPushButton *>("backend_panel")->click();
-    auto panel=manager->mainWidget.findChild<QDialog *>("backend_dialog");bool panelPass=false;QElapsedTimer timer;timer.start();
-    while(panel && timer.elapsed()<10000){QApplication::processEvents();auto label=panel->findChild<QLabel *>("backend_state");if(label && label->text().contains("后台已运行")){panelPass=true;break;}QThread::msleep(10);}
+    // 后台现在使用独立命令窗口，客户端不再负责启动/停止服务器。
+    auto manager=WinManager::getInstence();manager->mainWidget.show();
+    bool panelPass=manager->mainWidget.findChild<QPushButton *>("backend_panel")==nullptr;
     ApiClient::request("/api/logout",{},true,&error);ApiSession::setToken({});
-    if(panelPass){
-        panel->findChild<QPushButton *>("backend_stop")->click();timer.restart();bool stopped=false;
-        while(timer.elapsed()<15000){QApplication::processEvents();if(panel->findChild<QLabel *>("backend_state")->text().contains("后台未全部就绪") && panel->findChild<QPushButton *>("backend_start")->isEnabled()){stopped=true;break;}QThread::msleep(10);}
-        panel->findChild<QPushButton *>("backend_start")->click();timer.restart();bool started=false;
-        while(timer.elapsed()<30000){QApplication::processEvents();if(panel->findChild<QLabel *>("backend_state")->text().contains("后台已运行") && panel->findChild<QPushButton *>("backend_stop")->isEnabled()){started=true;break;}QThread::msleep(10);}
-        panelPass=stopped&&started;
-    }
-    if(panel)panel->close();fprintf(stdout,"Backend status window: %s\n",panelPass?"PASS":"FAIL");
+    fprintf(stdout,"Client backend panel removed: %s\n",panelPass?"PASS":"FAIL");
     WinManager::releaseInstence();
     return network && cameraPass && panelPass && gesturePass?0:5;
 }

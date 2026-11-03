@@ -17,6 +17,9 @@ def main():
     runtime.mkdir(exist_ok=True)
     flags = subprocess.CREATE_NO_WINDOW
     script = root / "scripts/local_demo.py"
+    if '--client-only' in sys.argv:
+        subprocess.run([sys.executable,str(script),str(resource),'--client-only'],check=True,timeout=10,creationflags=flags)
+        return
     if "--stop" in sys.argv:
         subprocess.run([sys.executable, str(script), str(resource), "--stop"], check=True, timeout=30, creationflags=flags)
         print("Services stopped.", flush=True)
@@ -40,6 +43,12 @@ def main():
                         raise OSError("API is not ready")
                 # 复用已验证的管理器，由它按正式配置打开客户端。
                 if '--services-only' not in sys.argv:
+                    console_state=runtime/'console.json';console_alive=False
+                    try:
+                        item=json.loads(console_state.read_text());actual=psutil.Process(item['pid'])
+                        console_alive=abs(actual.create_time()-item['created'])<.01 and actual.exe().lower()==sys.executable.lower()
+                    except (OSError,ValueError,KeyError,psutil.Error):pass
+                    if not console_alive:subprocess.Popen([sys.executable,str(root/'scripts/backend_console.py'),str(resource)],cwd=runtime,creationflags=subprocess.CREATE_NEW_CONSOLE)
                     subprocess.run([sys.executable, str(script), str(resource)], check=True, timeout=10, creationflags=flags)
                 (runtime / "last-error.txt").unlink(missing_ok=True)
                 print("Services ready." if '--services-only' in sys.argv else "Services ready. Client opened.", flush=True)

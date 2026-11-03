@@ -6,6 +6,7 @@ root=Path(__file__).resolve().parents[1]
 x=Path(sys.argv[1]).resolve()
 sys.path.insert(0,str(x/'runtime-python'))
 import psutil
+class ManagedFailure(RuntimeError):pass
 runtime=x/'runtime-state';runtime.mkdir(exist_ok=True)
 state_path=runtime/'local-stack.json'
 flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
@@ -56,6 +57,7 @@ def open_client():
 
 if '--stop' in sys.argv:stop_existing();sys.exit(0)
 ffmpeg=next((x/'media-tools/imageio-ffmpeg/imageio_ffmpeg/binaries').glob('ffmpeg*.exe'))
+if '--client-only' in sys.argv:open_client();sys.exit(0)
 old=load_state()
 if old.get('supervisor') and verified(old['supervisor']):
  if '--no-client' not in sys.argv:open_client()
@@ -90,14 +92,16 @@ try:
  publisher,publisher_identity=publish();issued=time.monotonic();save_state(True)
  if '--no-client' not in sys.argv:open_client()
  while True:
-  if any(p.poll() is not None for p in processes):raise RuntimeError('a managed service exited')
+  for process,item in zip(processes,services):
+   if process.poll() is not None:raise ManagedFailure(item['name']+' exited with code '+str(process.returncode))
   api('/api/cameras/heartbeat',{'cameraId':camera,'ttl':6},token)
   if time.monotonic()-issued>2700:
    terminate(publisher_identity);processes.remove(publisher);services.remove(publisher_identity)
    token=api('/api/login',accounts['admin'])['token'];publisher,publisher_identity=publish();issued=time.monotonic();save_state(True)
   time.sleep(2)
 except BaseException as error:
- (runtime/'last-error.txt').write_text(type(error).__name__+': local stack stopped; inspect service log.')
+ detail=str(error) if isinstance(error,ManagedFailure) else ('HTTP '+str(error.code) if isinstance(error,urllib.error.HTTPError) else 'local stack stopped; inspect service log.')
+ (runtime/'last-error.txt').write_text(time.strftime('%Y-%m-%d %H:%M:%S')+' '+type(error).__name__+': '+detail)
 finally:
  for item in reversed(services):terminate(item)
  state_path.unlink(missing_ok=True);log.close()
