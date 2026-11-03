@@ -1,16 +1,54 @@
-name: CMake build
+name: Linux build and runtime acceptance
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
   linux-build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install Linux runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xvfb mysql-server libmysqlclient-dev redis-server libgl1 libegl1 libgles2 libopengl0 libpulse0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0
+          sudo systemctl start mysql
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.11.2'
           modules: 'qtmultimedia qthttpserver qtwebsockets'
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cache: true
+      - name: Ensure matching Qt MySQL driver
+        shell: bash
+        run: |
+          if [ ! -f "$QT_ROOT_DIR/plugins/sqldrivers/libqsqlmysql.so" ]; then
+            git clone --depth 1 --filter=blob:none --sparse --branch v6.11.2 https://github.com/qt/qtbase.git "$RUNNER_TEMP/qtbase-driver-src"
+            git -C "$RUNNER_TEMP/qtbase-driver-src" sparse-checkout set src/plugins/sqldrivers
+            qt-cmake -S "$RUNNER_TEMP/qtbase-driver-src/src/plugins/sqldrivers" -B "$RUNNER_TEMP/qt-mysql-build" -DMySQL_INCLUDE_DIR=/usr/include/mysql -DMySQL_LIBRARY=/usr/lib/x86_64-linux-gnu/libmysqlclient.so -DCMAKE_INSTALL_PREFIX="$QT_ROOT_DIR"
+            cmake --build "$RUNNER_TEMP/qt-mysql-build" --parallel 2
+            cmake --install "$RUNNER_TEMP/qt-mysql-build"
+          fi
+          ldd "$QT_ROOT_DIR/plugins/sqldrivers/libqsqlmysql.so"
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEBULAVISION_ACCEPTANCE=ON
       - run: cmake --build build --parallel 2
-      # 此工作流尚未在远程执行，编译检查不等同于完整GUI或媒体运行验收。
+      - name: Install real model inference dependencies
+        run: python -m pip install -r detector/live-requirements.txt grpcio==1.85.1 grpcio-tools==1.85.1 psutil==7.2.2
+      - name: Run isolated Linux acceptance
+        env:
+          NEBULAVISION_CI: '1'
+          CI_MYSQL_ROOT_PASSWORD: root
+        run: python tests/linux_acceptance.py build
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/nebulavision-acceptance/report.json
+            ${{ runner.temp }}/nebulavision-acceptance/*.log
+            ${{ runner.temp }}/nebulavision-acceptance/linux-playback.png
+          if-no-files-found: ignore
+          retention-days: 7

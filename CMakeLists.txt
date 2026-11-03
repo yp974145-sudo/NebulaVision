@@ -20,3 +20,11 @@ target_link_libraries(nebulavision_server PRIVATE Qt6::Core Qt6::Sql Qt6::Networ
 install(TARGETS class15 nebulavision_server RUNTIME DESTINATION bin)
 install(DIRECTORY agent DESTINATION . PATTERN "__pycache__" EXCLUDE)
 install(DIRECTORY NebulaVision/docs DESTINATION NebulaVision)
+
+# 可选的云端运行验收入口，默认不影响正常客户端构建。
+option(NEBULAVISION_ACCEPTANCE "Build Linux GUI acceptance runner" OFF)
+if(NEBULAVISION_ACCEPTANCE)
+    add_executable(linux_gui_acceptance tests/linux_acceptance_gui.cpp resources.qrc ${CLIENT_SOURCES} ${CLIENT_HEADERS})
+    target_include_directories(linux_gui_acceptance PRIVATE util)
+    target_link_libraries(linux_gui_acceptance PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Sql Qt6::Network Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
+endif()
