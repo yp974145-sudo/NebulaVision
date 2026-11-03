@@ -9,6 +9,12 @@ def main():
     sys.path.insert(0, str(resource / "agent-python"))
     from workflow import BusinessTools, run_query
     request = json.loads(sys.stdin.read(16384))
+    if request["question"].startswith("文档 "):
+        BusinessTools(request["token"]).get("/api/me")
+        sys.path.insert(0, str(resource / "rag-python"))
+        from retrieval import search
+        documents = Path(__file__).resolve().parents[1] / "NebulaVision/docs"
+        return {"report": search(resource, documents, request["question"][3:]), "taskId": request["taskId"]}
     state = resource / "agent-state"
     state.mkdir(exist_ok=True)
     return run_query(BusinessTools(request["token"]), request["question"],

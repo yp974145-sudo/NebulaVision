@@ -65,7 +65,7 @@ void MainWidget::inif_top_widget()
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setWindowTitle("业务查询助手");dialog->resize(680,460);
         QVBoxLayout *layout=new QVBoxLayout(dialog);
-        layout->addWidget(new QLabel("支持：设备列表、今日事件、2026-11-02 事件（UTC）"));
+        layout->addWidget(new QLabel("支持：设备列表、今日事件、YYYY-MM-DD 事件（UTC）、文档 登录失败怎么办"));
         QLineEdit *question=new QLineEdit("设备列表",dialog);
         QPushButton *run=new QPushButton("查询 / 失败后重试",dialog);
         QPlainTextEdit *output=new QPlainTextEdit(dialog);output->setReadOnly(true);
