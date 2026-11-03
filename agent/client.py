@@ -8,7 +8,8 @@ def main():
     resource = Path(sys.argv[1]).resolve()
     sys.path.insert(0, str(resource / "agent-python"))
     from workflow import BusinessTools, run_query
-    request = json.loads(sys.stdin.read(16384))
+    # Qt发送UTF-8；Windows控制台默认编码可能是GBK，必须显式解码。
+    request = json.loads(sys.stdin.buffer.read(16384).decode("utf-8"))
     if request["question"].startswith("文档 "):
         BusinessTools(request["token"]).get("/api/me")
         sys.path.insert(0, str(resource / "rag-python"))

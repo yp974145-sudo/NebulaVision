@@ -1,0 +1,16 @@
+name: CMake build
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          modules: 'qtmultimedia qthttpserver qtwebsockets'
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel 2
+      # 此工作流尚未在远程执行，编译检查不等同于完整GUI或媒体运行验收。

@@ -35,7 +35,7 @@ Qt中的QProcess独立运行Python，GUI不用同步等待。started信号触发
 ## 测试与边界
 受控测试通过：查询超时后恢复、账号checkpoint隔离、过期会话拒绝、非法日期、写操作拒绝、问题变更拒绝、事件总数与展示条数区分。真实管理员和普通用户的设备数、事件总数分别与直接API查询一致。Qt6 Release重新编译通过。
 
-尚未完成主窗口助手的鼠标自动化回归、长时间并发压测、其他机器Python路径适配和大语言模型接入。checkpoint包含业务查询结果，属于本机运行数据，应限制本机文件权限并在交付中排除；本阶段尚无自动保留期清理。恢复会重新核验登录，缓存文件本身不作为独立授权入口。当前桌面进程启动方式需要本机agent-python依赖目录。
+原Qt窗口到Python、真实API报告及文档检索的offscreen集成验证已通过；尚未完成真实屏幕鼠标交互、长时间并发压测、其他机器Python路径适配和大语言模型接入。checkpoint包含业务查询结果，属于本机运行数据，应限制本机文件权限并在交付中排除；本阶段尚无自动保留期清理。恢复会重新核验登录，缓存文件本身不作为独立授权入口。当前桌面进程启动方式需要本机agent-python依赖目录。
 
 ## 面试追问与答案
 问题1：LangGraph是什么？答：用节点和边表达任务流程的状态图框架。这里四个节点把解析、查询、证据检查和报告分开。追问：有图就等于LLM Agent吗？答：不等于，本阶段没有LLM，只有规则流程。
@@ -55,3 +55,6 @@ Qt中的QProcess独立运行Python，GUI不用同步等待。started信号触发
 
 ## 官方资料
 LangGraph SqliteSaver：https://reference.langchain.com/python/langgraph.checkpoint.sqlite/SqliteSaver 。这是流程持久化的官方API说明，具体业务权限与Qt集成由本项目实现。
+
+
+补充集成修复：Qt通过stdin发送UTF-8 JSON；Windows的Python默认输入编码可能不同。client.py使用sys.stdin.buffer.read后显式decode UTF-8，避免中文问题被错误解码。tests/agent_ui_check.cpp已从原主窗口完成业务查询与真实向量检索，两条链路退出码0。

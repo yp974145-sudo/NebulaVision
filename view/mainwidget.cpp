@@ -59,16 +59,21 @@ void MainWidget::inif_top_widget()
     btn_review=new QPushButton(QIcon(":/img/视频回放.png"),"回放");
     this->top_layout->addWidget(btn_review);
     QPushButton *btn_setting=new QPushButton(QIcon(":/img/设置.png"),"查询助手");
+    btn_setting->setObjectName("query_assistant");
     this->top_layout->addWidget(btn_setting);
     connect(btn_setting,&QPushButton::clicked,this,[this]() {
         QDialog *dialog=new QDialog(this);
+        dialog->setObjectName("query_assistant_dialog");
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setWindowTitle("业务查询助手");dialog->resize(680,460);
         QVBoxLayout *layout=new QVBoxLayout(dialog);
         layout->addWidget(new QLabel("支持：设备列表、今日事件、YYYY-MM-DD 事件（UTC）、文档 登录失败怎么办"));
         QLineEdit *question=new QLineEdit("设备列表",dialog);
+        question->setObjectName("assistant_question");
         QPushButton *run=new QPushButton("查询 / 失败后重试",dialog);
+        run->setObjectName("assistant_run");
         QPlainTextEdit *output=new QPlainTextEdit(dialog);output->setReadOnly(true);
+        output->setObjectName("assistant_output");
         layout->addWidget(question);layout->addWidget(run);layout->addWidget(output);
         QProcess *process=new QProcess(dialog);
         QTimer *deadline=new QTimer(dialog);deadline->setSingleShot(true);
@@ -80,8 +85,10 @@ void MainWidget::inif_top_widget()
         connect(run,&QPushButton::clicked,dialog,[=]() {
             if(ApiSession::token().isEmpty()){output->setPlainText("请先登录。");return;}
             if(question->text()!=*lastQuestion){*task=QUuid::createUuid().toString(QUuid::WithoutBraces);*lastQuestion=question->text();}
-            QString root=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
-            QString resources=QDir(root).absoluteFilePath("../x");
+            QString root=QString::fromUtf8(qgetenv("NEBULAVISION_PROJECT_ROOT"));
+            if(root.isEmpty())root=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
+            QString resources=QString::fromUtf8(qgetenv("NEBULAVISION_RESOURCES_ROOT"));
+            if(resources.isEmpty())resources=QDir(root).absoluteFilePath("../x");
             QString python=QString::fromUtf8(qgetenv("NEBULAVISION_AGENT_PYTHON"));
             if(python.isEmpty())python=QDir::homePath()+"/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe";
             process->setProgram(python);process->setArguments({root+"/agent/client.py",resources});

@@ -49,6 +49,7 @@ def port_ready(port):
  except OSError:return False
 def open_client():
  env=os.environ.copy();env['NEBULAVISION_API_URL']='http://127.0.0.1:18880';env['NEBULAVISION_FFMPEG']=str(ffmpeg);env['NEBULAVISION_CACHE_ROOT']=str(x/'playback-cache')
+ env['NEBULAVISION_PROJECT_ROOT']=str(root);env['NEBULAVISION_RESOURCES_ROOT']=str(x);env['NEBULAVISION_AGENT_PYTHON']=sys.executable
  subprocess.Popen([str(root/'bin-qt6/class15.exe')],env=env)
 
 if '--stop' in sys.argv:stop_existing();sys.exit(0)
