@@ -31,6 +31,7 @@ static QHttpServerResponse fail(const QString &message,int code) {
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
     QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat","/api/detections/start","/api/detections/job"};
+    paths.append("/api/users");
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -148,6 +149,39 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         // Redis故障时仍有进程内保护，但不宣称跨进程共享限流。
         QMutexLocker lock(&sessionMutex);auto &counter=fallbackLimits[userId];qint64 minute=QDateTime::currentSecsSinceEpoch()/60;
         if(counter.second!=minute){counter={0,minute};}if(++counter.first>limit)return fail("local rate limit exceeded",429);
+    }
+    if(request.path=="/api/users") {
+        if(!admin)return fail("admin required",403);
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        QString name=request.body.value("username").toString().trimmed();
+        QString password=request.body.value("password").toString();
+        QJsonArray cameras=request.body.value("cameraIds").toArray();
+        if(!QRegularExpression("^[A-Za-z0-9_]{3,32}$").match(name).hasMatch() || password.size()<6 || password.size()>128 || cameras.size()>100)
+            return fail("invalid account",400);
+        if(request.body.contains("role") && request.body.value("role").toString()!="viewer")return fail("viewer role only",400);
+        for(const QJsonValue &camera:cameras){
+            bool ok=false;qint64 id=camera.toString().toLongLong(&ok);if(!ok || id<=0)return fail("invalid camera",400);
+            auth.prepare("SELECT 1 FROM cameras WHERE id=?");auth.addBindValue(id);
+            if(!auth.exec())return fail("database error",500);
+            if(!auth.next())return fail("camera missing",404);
+        }
+        auth.finish();
+        QByteArray salt(16,0);for(int i=0;i<salt.size();i++)salt[i]=char(QRandomGenerator::system()->generate()&255);
+        QByteArray hash=QPasswordDigestor::deriveKeyPbkdf2(QCryptographicHash::Sha256,password.toUtf8(),salt,200000,32);
+        QString stored="pbkdf2_sha256$200000$"+QString::fromLatin1(salt.toBase64())+"$"+QString::fromLatin1(hash.toBase64());
+        if(!connection.db.transaction())return fail("transaction unavailable",500);
+        auto abort=[&](int code){auth.finish();connection.db.rollback();return fail("account creation failed",code);};
+        auth.prepare("INSERT INTO users(username,password_hash,status) VALUES (?,?,'active')");auth.addBindValue(name);auth.addBindValue(stored);
+        if(!auth.exec())return abort(auth.lastError().nativeErrorCode()=="1062"?409:500);
+        QString id=auth.lastInsertId().toString();
+        auth.prepare("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='viewer'");auth.addBindValue(id);
+        if(!auth.exec() || auth.numRowsAffected()!=1)return abort(500);
+        for(const QJsonValue &camera:cameras){
+            auth.prepare("INSERT IGNORE INTO user_camera_permissions(user_id,camera_id) VALUES (?,?)");auth.addBindValue(id);auth.addBindValue(camera.toString());
+            if(!auth.exec())return abort(500);
+        }
+        auth.finish();if(!connection.db.commit())return abort(500);
+        return reply(QJsonObject{{"id",id},{"username",name},{"role","viewer"}},201);
     }
     if(request.path=="/api/status")return reply(QJsonObject{{"redis",redisOk?"available":"unavailable"},{"rateMode",redisOk?"redis":"local-fallback"}});
     if(request.path=="/api/cameras/heartbeat") {

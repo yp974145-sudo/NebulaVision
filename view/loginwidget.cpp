@@ -22,7 +22,7 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     QVBoxLayout *main_layout=new QVBoxLayout;
     this->setLayout(main_layout);
 
-    QLabel *lab_title=new QLabel("NebulaVision 服务端登录");
+    QLabel *lab_title=new QLabel("登录");
     lab_title->setFont(QFont("宋体",20,QFont::Bold));
     lab_title->setAlignment(Qt::AlignCenter);//设置对齐方式为水平+垂直居中
 
@@ -44,9 +44,6 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
         ediy_pwd->setEchoMode(visible ? QLineEdit::Normal : QLineEdit::Password);
     });
     form_layout->addRow(showPassword);
-    QLabel *accountTip=new QLabel("使用新系统账号；旧系统账号不能直接登录。\n密码见 jk/x/本机登录信息.local.json，需先启动本机服务。");
-    accountTip->setWordWrap(true);
-    form_layout->addRow(accountTip);
 
     //验证码布局容器
     QHBoxLayout *vcode_layout=new QHBoxLayout;
@@ -65,15 +62,11 @@ LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent)
     //按钮容器布局
     QHBoxLayout* btn_layout=new QHBoxLayout;
     btn_login=new QPushButton("登录");
-    QPushButton* btn_reg=new QPushButton("注册");
-    btn_reg->setText("账号由管理员创建");
-    btn_reg->setEnabled(false); // 不再走旧库注册写入。
     QPushButton* btn_cancel=new QPushButton("返回主界面");
     btn_cancel->setObjectName("login_back");
     // close()统一走closeEvent，按钮和右上角关闭使用相同的返回逻辑。
     connect(btn_cancel,&QPushButton::clicked,this,&QWidget::close);
     btn_layout->addWidget(btn_login);
-    btn_layout->addWidget(btn_reg);
     btn_layout->addWidget(btn_cancel);
     form_layout->addRow(btn_layout);
 

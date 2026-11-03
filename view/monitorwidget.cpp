@@ -10,6 +10,14 @@
 #include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QJsonArray>
+#include <QDialog>
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+#include <QCamera>
+#include <QCameraDevice>
+#include <QMediaDevices>
+#include <QMediaCaptureSession>
+#include <QVideoWidget>
+#endif
 
 MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
 {
@@ -19,7 +27,7 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     QVBoxLayout *leftLayout = new QVBoxLayout(left);
     left->setMinimumWidth(180);
     left->setMaximumWidth(240);
-    QLabel *listTitle = new QLabel("预览通道（尚未接设备管理）");
+    QLabel *listTitle = new QLabel("预览通道");
     listTitle->setWordWrap(true);
     leftLayout->addWidget(listTitle);
     channelList = new QListWidget(left);
@@ -93,6 +101,24 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     buttons->addWidget(stop,1,2);
     buttons->addWidget(pauseAll,2,0); buttons->addWidget(resumeAll,2,1);
     buttons->addWidget(stopAllButton,2,2);
+    QPushButton *localCamera=new QPushButton("本机/USB摄像头");buttons->addWidget(localCamera,0,4);
+    connect(localCamera,&QPushButton::clicked,this,[this](){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        const QList<QCameraDevice> devices=QMediaDevices::videoInputs();
+        if(devices.isEmpty()){deviceStatus->setText("未发现本机摄像头。请检查USB连接及Windows摄像头隐私权限。");return;}
+        QStringList names;for(int i=0;i<devices.size();i++)names.append(QString::number(i+1)+". "+devices[i].description());
+        bool accepted=false;QString selected=QInputDialog::getItem(this,"本机摄像头","选择摄像头",names,0,false,&accepted);
+        if(!accepted)return;int index=names.indexOf(selected);if(index<0)return;
+        QDialog *preview=new QDialog(this);preview->setAttribute(Qt::WA_DeleteOnClose);preview->setWindowTitle("本机摄像头预览");preview->resize(720,520);
+        QVBoxLayout *layout=new QVBoxLayout(preview);auto video=new QVideoWidget(preview);layout->addWidget(video,1);
+        QLabel *message=new QLabel("本机预览；后台录像和检测请使用服务端设备。",preview);message->setWordWrap(true);layout->addWidget(message);
+        auto camera=new QCamera(devices[index],preview);auto session=new QMediaCaptureSession(preview);session->setCamera(camera);session->setVideoOutput(video);
+        connect(camera,&QCamera::errorOccurred,preview,[message](QCamera::Error,const QString &error){message->setText("摄像头打开失败："+error+"。请检查是否被其他软件占用及Windows权限。");});
+        connect(preview,&QDialog::finished,camera,&QCamera::stop);preview->show();camera->start();
+#else
+        deviceStatus->setText("本机摄像头入口需要Qt6版本。");
+#endif
+    });
     rightLayout->addLayout(buttons);
     QLabel *hint = new QLabel("左侧选择通道后打开视频。暂停后继续；停止或结束后从头重播。预览静音。");
     hint->setWordWrap(true);
@@ -109,7 +135,7 @@ MonitorWidget::MonitorWidget(QWidget *parent) : QWidget(parent)
     connect(stream,&QPushButton::clicked,this,[this](){
         bool accepted=false;
         QString url=QInputDialog::getText(this,"打开当前通道RTSP","地址仅用于本次预览",QLineEdit::Normal,
-                                         "rtsp://127.0.0.1:18554/demo",&accepted);
+                                         QString(),&accepted);
         if(accepted && !url.trimmed().isEmpty()) openSource(selectedChannel,url.trimmed());
     });
     connect(pause,&QPushButton::clicked,this,[this](){players[selectedChannel]->pause();});
@@ -132,7 +158,11 @@ void MonitorWidget::openSource(int channel,const QString &source)
     channelList->setCurrentRow(channel); // 回放指定通道时同步选择，避免视频在隐藏槽播放。
     players[channel]->open(source);
 }
-void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop(); }
+void MonitorWidget::stopAll() { for(int i=0;i<4;i++) players[i]->stop();
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    for(QCamera *camera:findChildren<QCamera *>())camera->stop();
+#endif
+}
 MonitorWidget::~MonitorWidget() { stopAll(); }
 void MonitorWidget::switch_to_channel1() { fourViews=false;updateLayout(); }
 void MonitorWidget::switch_to_channel4() { fourViews=true;updateLayout(); }

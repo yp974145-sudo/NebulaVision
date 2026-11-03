@@ -38,6 +38,8 @@ QJsonObject ApiClient::request(const QString &path,const QJsonObject &body,bool 
             if(status==401)*error=path=="/api/login" ? "用户名或密码错误，或账号已停用。请使用新系统账号。" : "请先登录，或登录已过期";
             else if(status==429)*error="操作过于频繁，请稍后再试";
             else if(status==403)*error="当前账号没有操作权限";
+            else if(status==409 && path=="/api/users")*error="用户名已存在，请换一个用户名";
+            else if(status==400 && path=="/api/users")*error="账号格式错误：用户名须为3至32位字母、数字或下划线，密码至少6位";
             else if(status>0)*error=QString("API请求失败（HTTP %1）").arg(status);
             else *error="服务端未连接或请求超时，请检查本机服务";
         }

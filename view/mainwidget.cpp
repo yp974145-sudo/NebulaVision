@@ -61,6 +61,11 @@ void MainWidget::inif_top_widget()
     this->top_layout->addWidget(btn_jiankong);
     btn_review=new QPushButton(QIcon(":/img/视频回放.png"),"回放");
     this->top_layout->addWidget(btn_review);
+    QPushButton *createAccount=new QPushButton("创建账号");top_layout->addWidget(createAccount);
+    connect(createAccount,&QPushButton::clicked,this,[this](){
+        if(ApiSession::token().isEmpty()){QMessageBox::information(this,"创建账号","请先以管理员身份登录。");return;}
+        WinManager::getInstence()->registerWidget.show();hide();
+    });
     QPushButton *btn_setting=new QPushButton(QIcon(":/img/设置.png"),"查询助手");
     btn_setting->setObjectName("query_assistant");
     this->top_layout->addWidget(btn_setting);
