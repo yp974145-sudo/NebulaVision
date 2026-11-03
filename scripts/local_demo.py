@@ -50,7 +50,9 @@ def port_ready(port):
 def open_client():
  env=os.environ.copy();env['NEBULAVISION_API_URL']='http://127.0.0.1:18880';env['NEBULAVISION_FFMPEG']=str(ffmpeg);env['NEBULAVISION_CACHE_ROOT']=str(x/'playback-cache')
  env['NEBULAVISION_PROJECT_ROOT']=str(root);env['NEBULAVISION_RESOURCES_ROOT']=str(x);env['NEBULAVISION_AGENT_PYTHON']=sys.executable
- subprocess.Popen([str(root/'bin-qt6/class15.exe')],env=env)
+ client=subprocess.Popen([str(root/'bin-qt6/class15.exe')],env=env)
+ time.sleep(.75)
+ if client.poll() is not None:raise RuntimeError('client exited immediately; check Qt runtime dependencies')
 
 if '--stop' in sys.argv:stop_existing();sys.exit(0)
 ffmpeg=next((x/'media-tools/imageio-ffmpeg/imageio_ffmpeg/binaries').glob('ffmpeg*.exe'))
