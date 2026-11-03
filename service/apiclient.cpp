@@ -12,7 +12,7 @@ static QMutex sessionMutex;
 static QString sessionToken;
 QString ApiSession::token(){QMutexLocker lock(&sessionMutex);return sessionToken;}
 void ApiSession::setToken(const QString &token){QMutexLocker lock(&sessionMutex);sessionToken=token;}
-QJsonObject ApiClient::request(const QString &path,const QJsonObject &body,bool post,QString *error) {
+QJsonObject ApiClient::request(const QString &path,const QJsonObject &body,bool post,QString *error,const QString &tokenOverride) {
     if(error)error->clear();
     QString base=QString::fromUtf8(qgetenv("NEBULAVISION_API_URL"));
     if(base.isEmpty())base="http://127.0.0.1:18880";
@@ -24,13 +24,13 @@ QJsonObject ApiClient::request(const QString &path,const QJsonObject &body,bool 
     QNetworkAccessManager manager;
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
-    QString token=ApiSession::token();
+    QString token=tokenOverride.isNull()?ApiSession::token():tokenOverride;
     if(!token.isEmpty())request.setRawHeader("Authorization",("Bearer "+token).toUtf8());
     QNetworkReply *reply=post?manager.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact)):manager.get(request);
     QEventLoop loop;QTimer timeout;timeout.setSingleShot(true);
     QObject::connect(&timeout,&QTimer::timeout,reply,&QNetworkReply::abort);
     QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
-    timeout.start(8000);loop.exec();
+    timeout.start(path=="/api/events/clip"?25000:8000);loop.exec();
     int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     QJsonDocument document=QJsonDocument::fromJson(reply->readAll());
     if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300 || !document.isObject()) {

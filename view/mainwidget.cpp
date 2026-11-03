@@ -36,9 +36,7 @@ MainWidget::MainWidget(QWidget *parent) : QWidget(parent)
 
     ReviewWidget *r_widget=new ReviewWidget;
     buttom_layout->addWidget(r_widget);
-    connect(r_widget,&ReviewWidget::recordingReady,this,[this,m_widget](const QString &path){
-        buttom_layout->setCurrentIndex(0);m_widget->switch_to_channel1();m_widget->openSource(0,path);
-    });
+    // 历史录像由回放页自己的播放器播放，不再覆盖实时监控通道。
     //将两个布局加到主布局
     main_layout->addLayout(top_layout,1);
     main_layout->addLayout(buttom_layout,8);
@@ -189,7 +187,7 @@ void MainWidget::init_connect()
         QString oldToken=ApiSession::token();QFutureWatcher<QString> *watcher=new QFutureWatcher<QString>(this);
         connect(watcher,&QFutureWatcher<QString>::finished,this,[this,watcher,oldToken](){
             watcher->deleteLater();btn_login->setEnabled(true);
-            if(ApiSession::token()==oldToken){ApiSession::setToken(QString());lab_login->setText("未登录");MonitorWidget *monitor=findChild<MonitorWidget *>();if(monitor){monitor->stopAll();monitor->refreshDevices();}}
+            if(ApiSession::token()==oldToken){ApiSession::setToken(QString());lab_login->setText("未登录");MonitorWidget *monitor=findChild<MonitorWidget *>();if(monitor){monitor->stopAll();monitor->refreshDevices();}auto review=findChild<ReviewWidget *>();if(review)review->clearPlayback();}
         });
         watcher->setFuture(QtConcurrent::run([](){QString error;ApiClient::request("/api/logout",{},true,&error);return error;}));
     });

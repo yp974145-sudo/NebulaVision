@@ -19,6 +19,10 @@
 #include <QPasswordDigestor>
 #include <QRandomGenerator>
 #include <QMutexLocker>
+#include <QProcess>
+#include <QHttpServerConfiguration>
+#include <QSemaphore>
+#include <QScopeGuard>
 
 using Status=QHttpServerResponder::StatusCode;
 static QHttpServerResponse reply(const QJsonObject &data,int code=200) {
@@ -29,10 +33,12 @@ static QHttpServerResponse fail(const QString &message,int code) {
 }
 // 每个工作请求拥有自己的连接；query必须在这个对象之前销毁。
 ApiServer::ApiServer(const QJsonObject &config):config(config) {
+    QHttpServerConfiguration limits;limits.setMaximumBodySize(17*1024*1024);http.setConfiguration(limits);
     http.route("/health",[](){return reply(QJsonObject{{"status","ok"},{"service","NebulaVision C++ API"}});});
     QStringList paths={"/api/events","/api/cameras","/api/camera","/api/login","/api/logout","/api/me","/api/media/play","/api/media/publish","/internal/media/auth","/api/recordings","/api/recordings/capture","/api/recordings/file","/api/status","/api/cameras/heartbeat","/api/detections/start","/api/detections/job"};
     paths.append("/api/users");
     paths.append("/api/cameras/register");paths.append("/api/cameras/source");paths.append("/api/events/gesture");
+    paths.append("/api/events/clip");
     for(const QString &path:paths) {
         http.route(path,[this](const QHttpServerRequest &request){
             ApiRequest snapshot;
@@ -193,10 +199,45 @@ QHttpServerResponse ApiServer::handle(const ApiRequest &request) {
         if(!auth.exec())return abort(500);
         if(auth.next()){QString id=auth.value(0).toString();if(!receipt(id))return abort(500);auth.finish();if(!connection.db.commit())return abort(500);return reply(QJsonObject{{"id",id},{"reused",true}});}
         auth.finish();auth.prepare("INSERT INTO events(event_key,camera_id,occurred_at,event_type,description,confidence,model_version,status) VALUES (?,?,UTC_TIMESTAMP(3),'gesture_open_palm',?,?,?,'new')");
-        auth.addBindValue("live:"+eventKey);auth.addBindValue(camera);auth.addBindValue("客户端实时模型上报：张开手掌连续3次，置信度达到0.60；无自动录像。");auth.addBindValue(confidence);auth.addBindValue("mediapipe-gesture-v1");
+        auth.addBindValue("live:"+eventKey);auth.addBindValue(camera);auth.addBindValue("客户端实时模型上报：张开手掌连续3次，置信度达到0.60；录像尚未关联。");auth.addBindValue(confidence);auth.addBindValue("mediapipe-gesture-v1");
         if(!auth.exec())return abort(500);QString id=auth.lastInsertId().toString();auth.finish();
         auth.prepare("INSERT INTO audit_logs(actor_id,action,resource_type,resource_id) VALUES (?,'report_gesture','event',?)");auth.addBindValue(userId);auth.addBindValue(id);if(!auth.exec())return abort(500);auth.finish();
         if(!receipt(id))return abort(500);auth.finish();if(!connection.db.commit())return abort(500);qInfo().noquote()<<"gesture_event_saved camera="<<camera<<" event="<<id;return reply(QJsonObject{{"id",id},{"reused",false}},201);
+    }
+    if(request.path=="/api/events/clip") {
+        if(request.method!=QHttpServerRequest::Method::Post)return fail("method",405);
+        QString eventKey=request.body.value("eventKey").toString();int pre=request.body.value("preFrames").toInt(-1),frames=request.body.value("frames").toInt();
+        if(!QRegularExpression("^[a-f0-9-]{36}$").match(eventKey).hasMatch() || pre<0 || pre>15 || frames<5 || frames>40 || pre>frames)return fail("invalid clip",400);
+        auth.prepare("SELECT e.id,e.camera_id,e.recording_id,r.actor_id FROM live_event_receipts r JOIN events e ON e.id=r.event_id JOIN cameras c ON c.id=e.camera_id WHERE r.request_key=? AND e.event_type='gesture_open_palm' AND c.enabled=1");auth.addBindValue(eventKey);
+        if(!auth.exec() || !auth.next())return fail("event receipt missing",404);
+        QString event=auth.value(0).toString(),camera=auth.value(1).toString(),existing=auth.value(2).toString();qint64 actor=auth.value(3).toLongLong();auth.finish();
+        if(actor!=userId)return fail("clip owner forbidden",403);
+        if(!admin){auth.prepare("SELECT 1 FROM user_camera_permissions WHERE user_id=? AND camera_id=?");auth.addBindValue(userId);auth.addBindValue(camera);if(!auth.exec() || !auth.next())return fail("camera forbidden",403);auth.finish();}
+        if(existing.toLongLong()>0)return reply(QJsonObject{{"recordingId",existing},{"reused",true}});
+        static QSemaphore clipSlots(2);
+        if(!clipSlots.tryAcquire())return fail("clip encoder busy",429);
+        auto releaseSlot=qScopeGuard([](){clipSlots.release();});
+        QString encoded=request.body.value("video").toString();if(encoded.size()>16*1024*1024)return fail("clip too large",413);
+        QByteArray video=QByteArray::fromBase64(encoded.toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
+        if(video.size()<100 || video.size()>12*1024*1024)return fail("invalid clip data",400);
+        QDir storage(config.value("recording_root").toString());if(!storage.mkpath("."))return fail("storage unavailable",503);
+        QString filename=QUuid::createUuid().toString(QUuid::WithoutBraces)+".mp4",destination=storage.filePath(filename),input=destination+".upload.mp4";
+        QFile file(input);if(!file.open(QIODevice::WriteOnly) || file.write(video)!=video.size()){file.close();QFile::remove(input);return fail("storage write failed",503);}file.close();
+        // 不直接信任上传的MP4：限时解码并重封片，只发布真正可读的视频。
+        QProcess encoder;encoder.setStandardErrorFile(QProcess::nullDevice());
+        encoder.start(config.value("ffmpeg").toString(),{"-hide_banner","-loglevel","error","-nostdin","-y","-i",input,"-an","-vf","fps=5,scale=640:360","-frames:v",QString::number(frames),"-t","8","-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-movflags","+faststart","-progress","pipe:1",destination});
+        bool done=encoder.waitForStarted(3000) && encoder.waitForFinished(15000);if(!done){encoder.kill();encoder.waitForFinished(1000);}QFile::remove(input);
+        int actual=0;for(const auto &line:encoder.readAllStandardOutput().split('\n'))if(line.startsWith("frame="))actual=line.mid(6).trimmed().toInt();
+        if(!done || encoder.exitCode()!=0 || actual<5 || actual<pre || !QFileInfo(destination).size()){QFile::remove(destination);return fail("clip decode failed",422);}
+        if(!connection.db.transaction()){QFile::remove(destination);return fail("transaction unavailable",500);}
+        auto abortClip=[&](){auth.finish();connection.db.rollback();QFile::remove(destination);return fail("clip save failed",500);};
+        auth.prepare("SELECT recording_id FROM events WHERE id=? FOR UPDATE");auth.addBindValue(event);if(!auth.exec() || !auth.next())return abortClip();existing=auth.value(0).toString();auth.finish();
+        if(existing.toLongLong()>0){connection.db.rollback();QFile::remove(destination);return reply(QJsonObject{{"recordingId",existing},{"reused",true}});}
+        auth.prepare("INSERT INTO recordings(camera_id,started_at,ended_at,object_key,status,bytes) SELECT camera_id,TIMESTAMPADD(MICROSECOND,?,occurred_at),TIMESTAMPADD(MICROSECOND,?,occurred_at),?,'ready',? FROM events WHERE id=?");
+        auth.addBindValue(-pre*200000);auth.addBindValue((actual-pre)*200000);auth.addBindValue(filename);auth.addBindValue(QFileInfo(destination).size());auth.addBindValue(event);if(!auth.exec())return abortClip();QString recording=auth.lastInsertId().toString();auth.finish();
+        auth.prepare("UPDATE events SET recording_id=?,description='客户端手势异常；已关联自动保存短片' WHERE id=?");auth.addBindValue(recording);auth.addBindValue(event);if(!auth.exec())return abortClip();auth.finish();
+        auth.prepare("INSERT INTO audit_logs(actor_id,action,resource_type,resource_id) VALUES (?,'save_alert_clip','recording',?)");auth.addBindValue(userId);auth.addBindValue(recording);if(!auth.exec())return abortClip();auth.finish();
+        if(!connection.db.commit())return abortClip();return reply(QJsonObject{{"recordingId",recording},{"reused",false}},201);
     }
     if(request.path=="/api/users") {
         if(!admin)return fail("admin required",403);

@@ -19,6 +19,7 @@
 #include <QtConcurrent>
 #include <QUuid>
 #include "../service/apiclient.h"
+#include "../service/alertcliprecorder.h"
 
 LivePreview::LivePreview(QWidget *parent):QWidget(parent) {
     setAttribute(Qt::WA_DeleteOnClose);setWindowTitle("实时人员 人脸 手势检测");resize(860,650);
@@ -30,6 +31,12 @@ LivePreview::LivePreview(QWidget *parent):QWidget(parent) {
     status=new QLabel("模型加载中……");status->setObjectName("live_status");status->setWordWrap(true);layout->addWidget(status);
     savedStatus=new QLabel("异常事件等待触发");savedStatus->setObjectName("event_save_status");savedStatus->setWordWrap(true);layout->addWidget(savedStatus);
     retrySave=new QPushButton("重试入库");retrySave->hide();layout->addWidget(retrySave);connect(retrySave,&QPushButton::clicked,this,&LivePreview::saveAlert);
+    clipRecorder=new AlertClipRecorder(this);
+    auto clipStatus=new QLabel("异常时自动保存短片：报警前最多3秒＋报警后5秒");clipStatus->setObjectName("clip_status");clipStatus->setWordWrap(true);layout->addWidget(clipStatus);
+    auto retryClip=new QPushButton("重试录像");layout->addWidget(retryClip);retryClip->hide();
+    connect(clipRecorder,&AlertClipRecorder::statusChanged,this,[clipStatus,retryClip](const QString &text){clipStatus->setText(text);retryClip->setVisible(text.contains("失败") || text.contains("先重试"));});
+    connect(retryClip,&QPushButton::clicked,clipRecorder,&AlertClipRecorder::retry);
+    clipSample.setInterval(200);connect(&clipSample,&QTimer::timeout,this,[this](){if(!paused && sample.isActive())clipRecorder->sample(latest);});clipSample.start();
     sink=new QVideoSink(this);
     connect(sink,&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame &frame){
         if(!frame.isValid())return;
@@ -107,6 +114,7 @@ void LivePreview::receive(){
         if(alarming && !wasAlarming && !saving && pendingAlert.isEmpty()){
             double confidence=.6;for(const auto &value:hands){auto hand=value.toObject();if(hand.value("gesture").toString()=="Open_Palm")confidence=qMax(confidence,hand.value("confidence").toDouble());}
             pendingAlert={{"cameraId",cameraId},{"eventKey",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"gesture","Open_Palm"},{"confidence",confidence},{"consecutive",3}};
+            if(!cameraId.isEmpty())clipRecorder->begin(pendingAlert.value("eventKey").toString());
             saveAlert();
         }
         lastFaces=int(faces.size());gestureAlert=alarming;
@@ -117,10 +125,10 @@ void LivePreview::receive(){
         busy=false;pending=QImage();deadline.start(10000);
     }
 }
-void LivePreview::stop(){sample.stop();deadline.stop();ready=false;busy=false;gestureAlert=false;positive=negative=0;if(camera)camera->stop();if(decodeTask){decodeTask->requestStop();decodeTask=nullptr;}if(worker.state()!=QProcess::NotRunning)worker.kill();latest=QImage();pending=QImage();status->setStyleSheet("");status->setText("已停止，关闭窗口后重新打开可再次检测。");}
+void LivePreview::stop(){clipRecorder->finish();clipRecorder->resetHistory();sample.stop();deadline.stop();ready=false;busy=false;gestureAlert=false;positive=negative=0;if(camera)camera->stop();if(decodeTask){decodeTask->requestStop();decodeTask=nullptr;}if(worker.state()!=QProcess::NotRunning)worker.kill();latest=QImage();pending=QImage();status->setStyleSheet("");status->setText("已停止，关闭窗口后重新打开可再次检测。");}
 void LivePreview::closeEvent(QCloseEvent *event){stop();worker.waitForFinished(1000);event->accept();}
 LivePreview::~LivePreview(){stop();worker.waitForFinished(1000);}
-void LivePreview::pause(){paused=true;deadline.stop();status->setText("已暂停");}
+void LivePreview::pause(){clipRecorder->finish();clipRecorder->resetHistory();paused=true;deadline.stop();status->setText("已暂停");}
 void LivePreview::resume(){if(sample.isActive()){paused=false;deadline.start(15000);return;}if(camera){startWorker();camera->start();}else if(!lastUrl.isEmpty())openStream(lastUrl);}
 void LivePreview::setCameraId(const QString &id){cameraId=id;}
 // 同一条告警保留同一个eventKey。网络失败后重试，后台不会重复插入。

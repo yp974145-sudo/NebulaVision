@@ -6,6 +6,8 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QSpinBox>
+#include <QMediaPlayer>
+#include <QSlider>
 #include "datapicker.h"
 #include "../service/reviewquerytask.h"
 class ReviewWidget : public QWidget {
@@ -14,6 +16,8 @@ public:
     explicit ReviewWidget(QWidget *parent=nullptr,const QString &configPath=QString());
     ~ReviewWidget() override;
     void refresh();
+    void stopPlayback();
+    void clearPlayback();
 signals:
     void recordingReady(const QString &localPath);
 private:
@@ -35,5 +39,12 @@ private:
     QDate selectedDate;
     int page=1,pages=1,generation=0;
     ReviewQueryTask *task=nullptr;
+    QMediaPlayer *playback;
+    QSlider *seek;
+    QLabel *playTime;
+    QLabel *playTitle;
+    QComboBox *speed;
+    int downloadGeneration=0;
+    bool updatingSeek=false;
 };
 #endif

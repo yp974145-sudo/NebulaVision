@@ -29,4 +29,8 @@ finally:
     try:call('/api/logout',{},admin)
     except Exception:pass
     if camera:
-        sql("START TRANSACTION; DELETE a FROM audit_logs a JOIN events e ON a.resource_type='event' AND a.resource_id=CAST(e.id AS CHAR) WHERE e.camera_id=%s; DELETE FROM live_event_receipts WHERE camera_id=%s; DELETE FROM events WHERE camera_id=%s; DELETE FROM cameras WHERE id=%s AND name='%s'; COMMIT;"%(camera,camera,camera,camera,name))
+        files=subprocess.run([r'E:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe','--host=127.0.0.1','--user='+config['username'],'--database=nebulavision_dev','--batch','--skip-column-names','--execute=SELECT object_key FROM recordings WHERE camera_id='+camera],text=True,env=db_env,check=True,capture_output=True).stdout.splitlines()
+        sql("START TRANSACTION; DELETE a FROM audit_logs a JOIN events e ON a.resource_type='event' AND a.resource_id=CAST(e.id AS CHAR) WHERE e.camera_id=%s; DELETE a FROM audit_logs a JOIN recordings r ON a.resource_type='recording' AND a.resource_id=CAST(r.id AS CHAR) WHERE r.camera_id=%s; DELETE FROM live_event_receipts WHERE camera_id=%s; DELETE FROM events WHERE camera_id=%s; DELETE FROM recordings WHERE camera_id=%s; DELETE FROM cameras WHERE id=%s AND name='%s'; COMMIT;"%(camera,camera,camera,camera,camera,camera,name))
+        for filename in files:
+            assert Path(filename).name==filename
+            (Path(config['recording_root'])/filename).unlink(missing_ok=True)

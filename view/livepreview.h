@@ -11,6 +11,7 @@
 #include <QPointer>
 #include <QJsonObject>
 class QPushButton;
+class AlertClipRecorder;
 #include "../player/ffmpegplayer.h"
 class QCamera;
 class QMediaPlayer;
@@ -62,5 +63,7 @@ private:
     bool saving=false;
     bool paused=false;
     QString lastUrl;
+    AlertClipRecorder *clipRecorder;
+    QTimer clipSample;
 };
 #endif

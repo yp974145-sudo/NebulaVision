@@ -9,12 +9,20 @@
 #include <QUuid>
 #include <QTimer>
 #include <QJsonArray>
+#include <QVideoWidget>
+#include <QFileInfo>
+#include <QTime>
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+#include <QVideoSink>
+#include <QVideoFrame>
+#endif
 ReviewWidget::ReviewWidget(QWidget *parent,const QString &configPath):QWidget(parent) {
     Q_UNUSED(configPath);qRegisterMetaType<RecordPage>("RecordPage");
+    setStyleSheet("QLabel { color:#eeeeee; } QComboBox { color:white; background:#252a32; }");
     QVBoxLayout *layout=new QVBoxLayout(this);
-    layout->addWidget(new QLabel("录像与事件查询（服务端API）"));
+    layout->addWidget(new QLabel("历史回放"));
     QHBoxLayout *filters=new QHBoxLayout;
-    typeBox=new QComboBox;typeBox->addItems({"录像记录（新库）","异常事件（新库）"});typeBox->setCurrentIndex(1);
+    typeBox=new QComboBox;typeBox->addItems({"全部录像","异常事件与录像"});typeBox->setCurrentIndex(1);
     datePicker=new DataPicker;datePicker->setFixedWidth(230);
     QPushButton *query=new QPushButton("查询日期"),*all=new QPushButton("全部记录");
     filters->addWidget(typeBox);filters->addWidget(datePicker);filters->addWidget(query);filters->addWidget(all);
@@ -25,6 +33,43 @@ ReviewWidget::ReviewWidget(QWidget *parent,const QString &configPath):QWidget(pa
     previous->setObjectName("previousPage");next->setObjectName("nextPage");jump->setObjectName("pageNumber");pageSize->setObjectName("pageSize");
     pagination->addWidget(count);pagination->addStretch();pagination->addWidget(new QLabel("每页"));pagination->addWidget(pageSize);pagination->addWidget(previous);pagination->addWidget(jump);pagination->addWidget(next);layout->addLayout(pagination);
     detail=new QLabel("双击ready录像，通过授权接口下载后在监控页播放。");detail->setObjectName("review_detail");detail->setWordWrap(true);layout->addWidget(detail);previous->setEnabled(false);next->setEnabled(false);
+    auto panel=new QWidget;auto videoLayout=new QVBoxLayout(panel);videoLayout->setContentsMargins(0,0,0,0);
+    playTitle=new QLabel("请选择一条有录像的异常事件");videoLayout->addWidget(playTitle);
+    playback=new QMediaPlayer(this);playback->setObjectName("reviewPlayer");
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    // 明确把实际解码帧画进本页，不依赖独立的原生视频窗口或GPU覆盖层。
+    auto video=new QLabel("等待选择录像");video->setAlignment(Qt::AlignCenter);video->setMinimumHeight(180);video->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);video->setStyleSheet("background:#15191f;");videoLayout->addWidget(video,1);
+    auto sink=new QVideoSink(this);sink->setObjectName("reviewVideoSink");playback->setVideoOutput(sink);
+    connect(sink,&QVideoSink::videoFrameChanged,this,[video](const QVideoFrame &frame){
+        if(!frame.isValid()){video->clear();return;}QImage image=frame.toImage();if(!image.isNull())video->setPixmap(QPixmap::fromImage(image).scaled(video->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    });
+#else
+    auto video=new QVideoWidget;video->setMinimumHeight(180);videoLayout->addWidget(video,1);playback->setVideoOutput(video);
+#endif
+    auto controls=new QHBoxLayout;QPushButton *play=new QPushButton("播放 / 暂停"),*stop=new QPushButton("停止回放");
+    seek=new QSlider(Qt::Horizontal);seek->setObjectName("reviewSeek");seek->setRange(0,0);playTime=new QLabel("00:00 / 00:00");
+    speed=new QComboBox;speed->setObjectName("reviewSpeed");for(double rate:{0.5,1.,1.5,2.})speed->addItem(QString::number(rate)+" 倍",rate);speed->setCurrentIndex(1);
+    controls->addWidget(play);controls->addWidget(stop);controls->addWidget(seek,1);controls->addWidget(playTime);controls->addWidget(speed);videoLayout->addLayout(controls);layout->insertWidget(2,panel,2);layout->setStretch(3,1);
+    connect(play,&QPushButton::clicked,this,[this](){
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        bool playing=playback->playbackState()==QMediaPlayer::PlayingState;
+#else
+        bool playing=playback->state()==QMediaPlayer::PlayingState;
+#endif
+        if(playing)playback->pause();else playback->play();
+    });connect(stop,&QPushButton::clicked,this,&ReviewWidget::stopPlayback);
+    connect(playback,&QMediaPlayer::durationChanged,this,[this](qint64 duration){seek->setMaximum(int(duration));});
+    connect(playback,&QMediaPlayer::seekableChanged,seek,&QSlider::setEnabled);seek->setEnabled(false);
+    connect(playback,&QMediaPlayer::positionChanged,this,[this](qint64 position){
+        if(!seek->isSliderDown()){updatingSeek=true;seek->setValue(int(position));updatingSeek=false;}
+        playTime->setText(QTime(0,0).addMSecs(int(position)).toString("mm:ss")+" / "+QTime(0,0).addMSecs(int(playback->duration())).toString("mm:ss"));
+    });
+    connect(seek,&QSlider::valueChanged,this,[this](int value){if(!updatingSeek && playback->isSeekable())playback->setPosition(value);});
+    connect(speed,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){playback->setPlaybackRate(speed->currentData().toDouble());});
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    connect(playback,&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString &){detail->setText("录像无法播放，文件可能损坏或解码器不支持。");});
+#endif
+    detail->setText("双击有录像关联的异常事件，在本页回放；没有录像的旧事件会明确提示。");
     connect(query,&QPushButton::clicked,this,[this](){resetQuery(true);});connect(all,&QPushButton::clicked,this,[this](){resetQuery(false);});
     connect(datePicker,&DataPicker::dateSelected,this,[this](const QDate &){resetQuery(true);});
     connect(typeBox,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){page=1;loadPage();});
@@ -62,9 +107,10 @@ void ReviewWidget::showPage(int id,const RecordPage &result){
     table->setWordWrap(true);table->resizeRowsToContents();
     page=result.page;pages=result.pages;jump->blockSignals(true);jump->setRange(1,pages);jump->setValue(page);jump->setEnabled(result.total>0);jump->blockSignals(false);previous->setEnabled(page>1);next->setEnabled(page<pages);
     count->setText(QString("共 %1 条 · 第 %2 / %3 页").arg(result.total).arg(page).arg(pages));
-    detail->setText(result.total==0?"查询成功，当前条件下没有记录。":"事件时间按UTC显示。双击ready录像可下载并回放；合成事件不代表真实检测。");
+    detail->setText(result.total==0?"当前条件下没有记录。":typeBox->currentIndex()==1?"双击标有可回放的事件播放异常录像；旧事件可能只有文字记录。时间为UTC。":"这里包含手动和自动录像；要按异常查找，请切换异常事件与录像。");
 }
 void ReviewWidget::openRecording(int row){
+    int request=++downloadGeneration; // 任何新选择都会使旧下载结果失效。
     if(!table->item(row,0) || !table->item(row,5))return;
     QString id;
     if(typeBox->currentIndex()==1){
@@ -76,11 +122,31 @@ void ReviewWidget::openRecording(int row){
     }
     bool valid=false;qint64 recordingId=id.toLongLong(&valid);if(!valid || recordingId<=0){detail->setText("没有有效的录像关联");return;}
     QString root=QString::fromUtf8(qgetenv("NEBULAVISION_CACHE_ROOT"));
+    QString resources=QString::fromUtf8(qgetenv("NEBULAVISION_RESOURCES_ROOT"));if(root.isEmpty() && !resources.isEmpty())root=resources+"/playback-cache";
     if(root.isEmpty())root=QCoreApplication::applicationDirPath()+"/../../x/playback-cache";QDir().mkpath(root);
-    QString localPath=QDir(root).filePath(id+".mp4");detail->setText("正在授权下载录像……");
+    QString session=ApiSession::token();playback->stop();
+    QString title=(typeBox->currentIndex()==1?"异常事件 #"+table->item(row,0)->text()+"  ·  ":QString())+"录像 #"+id;playTitle->setText("加载中  "+title);
+    QString localPath=QDir(root).filePath(id+"_"+QUuid::createUuid().toString(QUuid::WithoutBraces)+".mp4");detail->setText("正在授权下载录像……");
     struct Result {QString path,error;};QFutureWatcher<Result> *watcher=new QFutureWatcher<Result>(this);
-    connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher](){Result result=watcher->result();watcher->deleteLater();if(!result.error.isEmpty()){detail->setText(result.error);return;}detail->setText("下载成功，切换到监控页播放。");emit recordingReady(result.path);});
+    connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,session,request,title](){Result result=watcher->result();watcher->deleteLater();if(request!=downloadGeneration || session!=ApiSession::token())return;if(!result.error.isEmpty()){detail->setText(result.error);playTitle->setText("加载失败  "+title);return;}
+        playback->stop();
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+        playback->setSource(QUrl::fromLocalFile(result.path));
+#else
+        playback->setMedia(QUrl::fromLocalFile(result.path));
+#endif
+        playTitle->setText(title);playback->setPlaybackRate(speed->currentData().toDouble());playback->play();detail->setText("正在本页回放，可拖动进度条或选择倍速。");emit recordingReady(result.path);
+    });
     watcher->setFuture(QtConcurrent::run([id,localPath](){Result result;result.path=localPath;ApiClient::download("/api/recordings/file?id="+id,localPath,&result.error);return result;}));
+}
+void ReviewWidget::stopPlayback(){++downloadGeneration;playback->stop();}
+void ReviewWidget::clearPlayback(){stopPlayback();++generation;latestDetection.clear();
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    playback->setSource(QUrl());
+#else
+    playback->setMedia(QUrl());
+#endif
+    table->clearContents();table->setRowCount(0);playTitle->setText("请选择一条有录像的异常事件");detail->setText("请登录后查询录像。");
 }
 ReviewWidget::~ReviewWidget(){if(task){disconnect(task,nullptr,this,nullptr);task->wait();delete task;}}
 
