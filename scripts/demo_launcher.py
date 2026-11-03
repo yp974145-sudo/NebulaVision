@@ -23,7 +23,7 @@ def main():
         return
     with (runtime / "launcher.log").open("ab", buffering=0) as log:
         process = subprocess.Popen([sys.executable, str(script), str(resource), "--supervise", "--no-client"],
-            creationflags=flags, stdout=log, stderr=log)
+            creationflags=flags, stdout=log, stderr=log, cwd=runtime)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
